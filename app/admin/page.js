@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import HelmetCard from '@/components/HelmetCard';
 import { CertificateBadge } from '@/components/CertificateBadges';
 import styles from './admin.module.css';
+import * as XLSX from 'xlsx';
 
 export default function AdminPanel() {
   const [adminUser, setAdminUser] = useState(null);
@@ -49,6 +50,7 @@ export default function AdminPanel() {
   const [totalValue, setTotalValue] = useState(0);
   const [editingId, setEditingId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
@@ -112,6 +114,63 @@ export default function AdminPanel() {
           return true;
       }
     });
+  };
+
+  const handleExportToExcel = () => {
+    try {
+      const filteredSales = getFilteredSales();
+      if (filteredSales.length === 0) {
+        setToast({ type: 'error', message: 'No hay ventas para exportar' });
+        return;
+      }
+
+      // Preparar datos para Excel
+      const excelData = filteredSales.map(sale => {
+        const product = products.find(p => p.id === sale.productoId) || {};
+        const saleDate = new Date(sale.createdAt).toLocaleString('es-PE');
+        
+        return {
+          'Fecha': saleDate,
+          'Producto': product.nombre || 'N/A',
+          'Marca': product.marca || 'N/A',
+          'Cantidad': sale.cantidad || 0,
+          'Talla': sale.talla || '-',
+          'Precio Unitario': sale.precioUnitario || 0,
+          'Total': sale.total || 0
+        };
+      });
+
+      // Crear worksheet
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Ajustar ancho de columnas
+      const columnWidths = [
+        { wch: 20 },  // Fecha
+        { wch: 30 },  // Producto
+        { wch: 15 },  // Marca
+        { wch: 10 },  // Cantidad
+        { wch: 10 },  // Talla
+        { wch: 15 },  // Precio Unitario
+        { wch: 12 }   // Total
+      ];
+      ws['!cols'] = columnWidths;
+
+      // Crear workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Ventas');
+
+      // Crear nombre de archivo con fecha y filtro
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filterStr = salesDateFilter === 'todos' ? 'todas' : salesDateFilter;
+      const filename = `inracing_ventas_${filterStr}_${dateStr}.xlsx`;
+
+      // Descargar archivo
+      XLSX.writeFile(wb, filename);
+      setToast({ type: 'success', message: `✅ Exportado ${filteredSales.length} ventas a Excel` });
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      setToast({ type: 'error', message: '❌ Error al exportar a Excel' });
+    }
   };
 
   const loadProducts = async () => {
@@ -205,13 +264,22 @@ export default function AdminPanel() {
   };
 
   const uploadImagesToStorage = async (files) => {
-    const urls = [];
-    for (const file of files) {
-      const storageRef = ref(storage, `cascos/${Date.now()}_${file.name}`);
+    if (!files || files.length === 0) return [];
+    
+    setUploadProgress(0);
+    const uploadPromises = files.map(async (file, index) => {
+      const storageRef = ref(storage, `cascos/${Date.now()}_${Math.random()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
-      urls.push(url);
-    }
+      
+      setUploadProgress(prev => Math.min(prev + (100 / files.length), 95));
+      
+      return url;
+    });
+    
+    const urls = await Promise.all(uploadPromises);
+    setUploadProgress(100);
+    setTimeout(() => setUploadProgress(0), 1500);
     return urls;
   };
 
@@ -698,6 +766,20 @@ export default function AdminPanel() {
                 )}
               </div>
 
+              {uploadProgress > 0 && (
+                <div className={styles.progressContainer}>
+                  <div className={styles.progressLabel}>
+                    Subiendo imágenes... {uploadProgress}%
+                  </div>
+                  <div className={styles.progressBar}>
+                    <div 
+                      className={styles.progressFill}
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className={styles.formActions}>
                 <button type="submit" className={styles.submitBtn} disabled={submitting}>
                   {submitting ? '⏳ Procesando...' : (editingId ? '✏️ Actualizar' : '➕ Crear')}
@@ -1004,20 +1086,29 @@ export default function AdminPanel() {
 
         {/* HISTORIAL DE VENTAS */}
         <div className={styles.analyticsSection}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap'}}>
             <h2 className={styles.listTitle}>📋 Historial de Ventas</h2>
-            <select
-              value={salesDateFilter}
-              onChange={(e) => setSalesDateFilter(e.target.value)}
-              className={styles.brandFilter}
-              style={{width: '200px'}}
-            >
-              <option value="todos">Todas las ventas</option>
-              <option value="hora">Última hora</option>
-              <option value="dia">Último día</option>
-              <option value="semana">Última semana</option>
-              <option value="mes">Último mes</option>
-            </select>
+            <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+              <select
+                value={salesDateFilter}
+                onChange={(e) => setSalesDateFilter(e.target.value)}
+                className={styles.brandFilter}
+                style={{width: '200px'}}
+              >
+                <option value="todos">Todas las ventas</option>
+                <option value="hora">Última hora</option>
+                <option value="dia">Último día</option>
+                <option value="semana">Última semana</option>
+                <option value="mes">Último mes</option>
+              </select>
+              <button 
+                onClick={handleExportToExcel}
+                className={styles.exportBtn}
+                title="Exportar ventas filtradas a Excel"
+              >
+                📊 Exportar
+              </button>
+            </div>
           </div>
           {sales.length === 0 ? (
             <p style={{padding: '20px', textAlign: 'center'}}>No hay ventas registradas</p>

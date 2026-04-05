@@ -1,15 +1,16 @@
 {
   "name": "moto-store-pro",
   "private": true,
-  "scripts": { 
+  "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
+    "firebase": "^9.23.0",
     "next": "14.0.0",
     "react": "^18",
     "react-dom": "^18",
-    "firebase": "^9.23.0"
+    "xlsx": "^0.18.5"
   }
 }
