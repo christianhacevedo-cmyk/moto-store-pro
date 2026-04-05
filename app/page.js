@@ -1,0 +1,343 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { db, auth } from '@/lib/firebase';
+import { collection, getDocs, query } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import Link from 'next/link';
+import Header from '@/components/Header';
+import HelmetCard from '@/components/HelmetCard';
+import { CertificateBadge } from '@/components/CertificateBadges';
+import styles from './catalogo.module.css';
+
+export default function Home() {
+  const [helmets, setHelmets] = useState([]);
+  const [filteredHelmets, setFilteredHelmets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [selectedHelmet, setSelectedHelmet] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  
+  const [filters, setFilters] = useState({
+    marca: '',
+    tipo: '',
+    priceRange: 'all'
+  });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const handleEscapeKey = (e) => {
+      if (e.key === 'Escape' && showModal) {
+        setShowModal(false);
+        setSelectedImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscapeKey);
+    return () => window.removeEventListener('keydown', handleEscapeKey);
+  }, [showModal]);
+
+  useEffect(() => {
+    const loadHelmets = async () => {
+      try {
+        setLoading(true);
+        const q = query(collection(db, 'proyectoCascos'));
+        const querySnapshot = await getDocs(q);
+        const data = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setHelmets(data);
+        setFilteredHelmets(data);
+      } catch (error) {
+        console.error('Error loading helmets:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadHelmets();
+  }, []);
+
+  useEffect(() => {
+    let filtered = [...helmets];
+
+    if (filters.marca) {
+      filtered = filtered.filter(h => h.marca?.toLowerCase().includes(filters.marca.toLowerCase()));
+    }
+
+    if (filters.tipo) {
+      filtered = filtered.filter(h => h.tipo?.toLowerCase().includes(filters.tipo.toLowerCase()));
+    }
+
+    if (filters.priceRange !== 'all') {
+      const [min, max] = filters.priceRange.split('-').map(Number);
+      filtered = filtered.filter(h => h.precio >= min && (max === Infinity ? true : h.precio <= max));
+    }
+
+    setFilteredHelmets(filtered);
+  }, [filters, helmets]);
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({ ...prev, [name]: value }));
+  };
+
+  const resetFilters = () => {
+    setFilters({ marca: '', tipo: '', priceRange: 'all' });
+  };
+
+  const uniqueMarcas = [...new Set(helmets.map(h => h.marca).filter(Boolean))];
+  const uniqueTipos = [...new Set(helmets.map(h => h.tipo).filter(Boolean))];
+
+  return (
+    <>
+      <Header />
+      <main className={styles.catalogContainer}>
+        {/* Hero Section */}
+        <div className={styles.heroSection}>
+          <div className={styles.heroContent}>
+            <h1 className={styles.heroTitle}>Catálogo Oficial de Cascos</h1>
+            <p className={styles.heroSubtitle}>
+              Explora nuestra colección premium de cascos para motociclismo de alto rendimiento
+            </p>
+          </div>
+        </div>
+
+        <div className={styles.mainGrid}>
+          {/* Sidebar Filtros */}
+          <aside className={styles.sidebar}>
+            <div className={styles.filterCard}>
+              <h3 className={styles.filterTitle}>Filtros</h3>
+              
+              <div className={styles.filterGroup}>
+                <label className={styles.filterLabel}>Marca</label>
+                <select 
+                  name="marca" 
+                  value={filters.marca}
+                  onChange={handleFilterChange}
+                  className={styles.filterSelect}
+                >
+                  <option value="">Todas</option>
+                  {uniqueMarcas.map(marca => (
+                    <option key={marca} value={marca}>{marca}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.filterGroup}>
+                <label className={styles.filterLabel}>Tipo</label>
+                <select 
+                  name="tipo" 
+                  value={filters.tipo}
+                  onChange={handleFilterChange}
+                  className={styles.filterSelect}
+                >
+                  <option value="">Todos</option>
+                  {uniqueTipos.map(tipo => (
+                    <option key={tipo} value={tipo}>{tipo}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.filterGroup}>
+                <label className={styles.filterLabel}>Rango de Precio</label>
+                <select 
+                  name="priceRange" 
+                  value={filters.priceRange}
+                  onChange={handleFilterChange}
+                  className={styles.filterSelect}
+                >
+                  <option value="all">Todos los precios</option>
+                  <option value="0-200">S/ 0 - S/ 200</option>
+                  <option value="200-500">S/ 200 - S/ 500</option>
+                  <option value="500-1000">S/ 500 - S/ 1000</option>
+                  <option value="1000-Infinity">S/ 1000+</option>
+                </select>
+              </div>
+
+              <button 
+                onClick={resetFilters}
+                className={styles.resetBtn}
+              >
+                Limpiar Filtros
+              </button>
+            </div>
+
+            {user?.email === 'admin@inracing.com' && (
+              <Link href="/admin" className={styles.adminLink}>
+                ⚙️ Panel Admin
+              </Link>
+            )}
+          </aside>
+
+          {/* Producto Grid */}
+          <section className={styles.productsSection}>
+            <div className={styles.resultInfo}>
+              <h2 className={styles.resultCount}>
+                {filteredHelmets.length} {filteredHelmets.length === 1 ? 'producto' : 'productos'}
+              </h2>
+            </div>
+
+            {loading ? (
+              <div className={styles.loadingState}>
+                <div className={styles.spinner}></div>
+                <p>Cargando catálogo...</p>
+              </div>
+            ) : filteredHelmets.length === 0 ? (
+              <div className={styles.emptyState}>
+                <p className={styles.emptyText}>❌ No hay cascos disponibles con esos filtros</p>
+                <button 
+                  onClick={resetFilters}
+                  className={styles.emptyButton}
+                >
+                  Ver todos
+                </button>
+              </div>
+            ) : (
+              <div className={styles.productsGrid}>
+                {filteredHelmets.map((helmet) => (
+                  <div 
+                    key={helmet.id}
+                    onClick={() => {
+                      setSelectedHelmet(helmet);
+                      setSelectedImage(null);
+                      setShowModal(true);
+                    }}
+                    className={styles.cardWrapper}
+                  >
+                    <HelmetCard 
+                      helmet={helmet}
+                      onSelect={() => {
+                        setSelectedHelmet(helmet);
+                        setShowModal(true);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Modal Detalle */}
+        {showModal && selectedHelmet && (
+          <div className={styles.modal} onClick={() => setShowModal(false)}>
+            <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+              <button 
+                onClick={() => setShowModal(false)}
+                className={styles.closeBtn}
+              >
+                ✕
+              </button>
+
+              <div className={styles.modalGrid}>
+                <div className={styles.modalImageWrapper}>
+                  <div className={styles.modalImage}>
+                    <img 
+                      src={selectedImage || selectedHelmet.imagen} 
+                      alt={selectedHelmet.nombre}
+                      className={styles.modalImg}
+                    />
+                  </div>
+
+                  {selectedHelmet.certificados && selectedHelmet.certificados.length > 0 && (
+                    <>
+                      <h4 className={styles.certificatesTitle}>Certificaciones de Seguridad</h4>
+                      <div className={styles.certificatesSection}>
+                        {selectedHelmet.certificados.map((cert, idx) => (
+                          <div key={idx}>
+                            <CertificateBadge type={cert} size="large" />
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className={styles.modalInfo}>
+                  <h2 className={styles.modalTitle}>{selectedHelmet.nombre}</h2>
+                  
+                  <div className={styles.modalPrice}>
+                    S/.{selectedHelmet.precio}
+                  </div>
+
+                  {selectedHelmet.marca && (
+                    <div className={styles.specItem}>
+                      <span className={styles.specLabel}>Marca:</span>
+                      <span className={styles.specValue}>{selectedHelmet.marca}</span>
+                    </div>
+                  )}
+
+                  {selectedHelmet.tipo && (
+                    <div className={styles.specItem}>
+                      <span className={styles.specLabel}>Tipo:</span>
+                      <span className={styles.specValue}>{selectedHelmet.tipo}</span>
+                    </div>
+                  )}
+
+                  {selectedHelmet.color && (
+                    <div className={styles.specItem}>
+                      <span className={styles.specLabel}>Color:</span>
+                      <span className={styles.specValue}>{selectedHelmet.color}</span>
+                    </div>
+                  )}
+
+                  {selectedHelmet.talla && (
+                    <div className={styles.specItem}>
+                      <span className={styles.specLabel}>Talla:</span>
+                      <span className={styles.specValue}>{selectedHelmet.talla}</span>
+                    </div>
+                  )}
+
+                  {selectedHelmet.descripcion && (
+                    <div className={styles.description}>
+                      <h4 className={styles.descTitle}>Descripción</h4>
+                      <p className={styles.descText}>{selectedHelmet.descripcion}</p>
+                    </div>
+                  )}
+
+                  {selectedHelmet.imagenes && selectedHelmet.imagenes.length > 1 && (
+                    <div className={styles.imageGallery}>
+                      <h4 className={styles.galleryTitle}>Galería ({selectedHelmet.imagenes.length})</h4>
+                      <div className={styles.thumbnails}>
+                        {selectedHelmet.imagenes.map((img, idx) => (
+                          <img 
+                            key={idx}
+                            src={img} 
+                            alt={`${selectedHelmet.nombre} ${idx + 1}`}
+                            className={`${styles.thumbnail} ${selectedImage === img ? styles.thumbnailActive : ''}`}
+                            onClick={() => setSelectedImage(img)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button 
+                    className={styles.ctaButton}
+                    onClick={() => {
+                      const message = `Hola, quiero consultar disponibilidad del casco: ${selectedHelmet.nombre}`;
+                      const whatsappUrl = `https://wa.me/51922679150?text=${encodeURIComponent(message)}`;
+                      window.open(whatsappUrl, '_blank');
+                    }}
+                  >
+                    Consultar Disponibilidad
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </>
+  );
+}
