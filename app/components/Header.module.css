@@ -8,6 +8,18 @@
   padding: 16px 0;
 }
 
+@media (max-width: 768px) {
+  .header {
+    padding: 12px 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    padding: 14px 0;
+  }
+}
+
 .container {
   max-width: 1400px;
   margin: 0 auto;
@@ -15,6 +27,19 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0 12px;
+    gap: 12px;
+  }
 }
 
 .logo {
@@ -33,6 +58,18 @@
   font-size: 1.5rem;
   font-weight: 700;
   color: #C6FF00;
+}
+
+@media (max-width: 768px) {
+  .logoText {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .logoText {
+    font-size: 1.1rem;
+  }
 }
 
 .nav {
@@ -86,5 +123,30 @@
 
   .userEmail {
     display: none;
+  }
+
+  .rightSection {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav {
+    gap: 8px;
+    justify-content: flex-end;
+    flex: 0;
+  }
+
+  .navLink {
+    font-size: 0.8rem;
+    padding: 6px 8px;
+  }
+
+  .rightSection {
+    gap: 8px;
+  }
+
+  .userMenu {
+    gap: 8px;
   }
 }
