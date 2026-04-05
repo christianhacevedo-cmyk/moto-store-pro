@@ -22,6 +22,7 @@ export default function AdminPanel() {
     tipo: '',
     color: '',
     precio: '',
+    precioCompra: '',
     descripcion: '',
     talla: '',
     cantidad: '',
@@ -128,6 +129,9 @@ export default function AdminPanel() {
       const excelData = filteredSales.map(sale => {
         const product = products.find(p => p.id === sale.productoId) || {};
         const saleDate = new Date(sale.createdAt).toLocaleString('es-PE');
+        const precioCompra = product.precioCompra || 0;
+        const precioVenta = sale.precioUnitario || 0;
+        const ganancia = (precioVenta - precioCompra) * (sale.cantidad || 1);
         
         return {
           'Fecha': saleDate,
@@ -135,8 +139,11 @@ export default function AdminPanel() {
           'Marca': product.marca || 'N/A',
           'Cantidad': sale.cantidad || 0,
           'Talla': sale.talla || '-',
-          'Precio Unitario': sale.precioUnitario || 0,
-          'Total': sale.total || 0
+          'Precio Compra': precioCompra,
+          'Precio Venta': precioVenta,
+          'Ganancia Unitaria': precioVenta - precioCompra,
+          'Total Venta': sale.total || 0,
+          'Total Ganancia': ganancia.toFixed(2)
         };
       });
 
@@ -150,8 +157,11 @@ export default function AdminPanel() {
         { wch: 15 },  // Marca
         { wch: 10 },  // Cantidad
         { wch: 10 },  // Talla
-        { wch: 15 },  // Precio Unitario
-        { wch: 12 }   // Total
+        { wch: 12 },  // Precio Compra
+        { wch: 12 },  // Precio Venta
+        { wch: 18 },  // Ganancia Unitaria
+        { wch: 12 },  // Total Venta
+        { wch: 15 }   // Total Ganancia
       ];
       ws['!cols'] = columnWidths;
 
@@ -305,6 +315,7 @@ export default function AdminPanel() {
         tipo: formData.tipo || '',
         color: formData.color || '',
         precio: parseFloat(formData.precio),
+        precioCompra: parseFloat(formData.precioCompra) || 0,
         cantidad: parseFloat(formData.cantidad) || 1,
         descripcion: formData.descripcion || '',
         talla: formData.talla || '',
@@ -347,6 +358,7 @@ export default function AdminPanel() {
         tipo: '',
         color: '',
         precio: '',
+        precioCompra: '',
         descripcion: '',
         talla: '',
         cantidad: '',
@@ -371,6 +383,7 @@ export default function AdminPanel() {
       tipo: product.tipo || '',
       color: product.color || '',
       precio: product.precio,
+      precioCompra: product.precioCompra || '',
       cantidad: product.cantidad || 1,
       descripcion: product.descripcion || '',
       talla: product.talla || '',
@@ -391,6 +404,7 @@ export default function AdminPanel() {
       tipo: '',
       color: '',
       precio: '',
+      precioCompra: '',
       descripcion: '',
       talla: '',
       cantidad: '',
@@ -659,6 +673,18 @@ export default function AdminPanel() {
                   name="cantidad"
                   placeholder="Cantidad disponible"
                   value={formData.cantidad}
+                  onChange={handleInputChange}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formGrid}>
+                <input
+                  type="number"
+                  step="0.01"
+                  name="precioCompra"
+                  placeholder="Precio de Compra (S/)"
+                  value={formData.precioCompra}
                   onChange={handleInputChange}
                   className={styles.input}
                 />
@@ -1020,6 +1046,20 @@ export default function AdminPanel() {
               <span className={styles.metricLabel}>Unidades Vendidas</span>
               <span className={styles.metricValue}>
                 {sales.reduce((sum, s) => sum + (s.cantidad || 0), 0)}
+              </span>
+            </div>
+            <div className={styles.metricCard}>
+              <span className={styles.metricLabel}>Ganancia Total</span>
+              <span className={styles.metricValue}>
+                S/ {(() => {
+                  const totalGanancia = sales.reduce((sum, sale) => {
+                    const product = products.find(p => p.id === sale.productoId);
+                    const precioCompra = product?.precioCompra || 0;
+                    const ganancia = ((sale.precioUnitario || 0) - precioCompra) * (sale.cantidad || 1);
+                    return sum + ganancia;
+                  }, 0);
+                  return totalGanancia.toFixed(2);
+                })()}
               </span>
             </div>
           </div>

@@ -243,6 +243,31 @@
   transition: all 0.3s ease;
 }
 
+.filterInput {
+  width: 100%;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(255, 145, 89, 0.2);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.filterInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.filterInput:hover {
+  border-color: #ff9159;
+}
+
+.filterInput:focus {
+  outline: none;
+  border-color: #ff9159;
+  box-shadow: 0 0 0 3px rgba(255, 145, 89, 0.1);
+}
+
 .filterSelect:hover {
   border-color: #ff9159;
 }

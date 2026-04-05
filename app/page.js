@@ -22,6 +22,7 @@ export default function Home() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
   const [filters, setFilters] = useState({
+    nombre: '',
     marca: '',
     tipo: '',
     priceRange: 'all'
@@ -110,6 +111,10 @@ export default function Home() {
   useEffect(() => {
     let filtered = [...helmets];
 
+    if (filters.nombre) {
+      filtered = filtered.filter(h => h.nombre?.toLowerCase().includes(filters.nombre.toLowerCase()));
+    }
+
     if (filters.marca) {
       filtered = filtered.filter(h => h.marca?.toLowerCase().includes(filters.marca.toLowerCase()));
     }
@@ -132,7 +137,7 @@ export default function Home() {
   };
 
   const resetFilters = () => {
-    setFilters({ marca: '', tipo: '', priceRange: 'all' });
+    setFilters({ nombre: '', marca: '', tipo: '', priceRange: 'all' });
   };
 
   const uniqueMarcas = [...new Set(helmets.map(h => h.marca).filter(Boolean))];
@@ -157,7 +162,17 @@ export default function Home() {
           <aside className={styles.sidebar}>
             <div className={styles.filterCard}>
               <h3 className={styles.filterTitle}>Filtros</h3>
-              
+                            <div className={styles.filterGroup}>
+                <label className={styles.filterLabel}>Buscar por Nombre</label>
+                <input 
+                  type="text" 
+                  name="nombre" 
+                  placeholder="Buscar casco..."
+                  value={filters.nombre}
+                  onChange={handleFilterChange}
+                  className={styles.filterInput}
+                />
+              </div>
               <div className={styles.filterGroup}>
                 <label className={styles.filterLabel}>Marca</label>
                 <select 
