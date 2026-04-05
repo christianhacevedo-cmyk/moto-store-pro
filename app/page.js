@@ -18,6 +18,8 @@ export default function Home() {
   const [selectedHelmet, setSelectedHelmet] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showImageLightbox, setShowImageLightbox] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
   const [filters, setFilters] = useState({
     marca: '',
@@ -43,6 +45,45 @@ export default function Home() {
     window.addEventListener('keydown', handleEscapeKey);
     return () => window.removeEventListener('keydown', handleEscapeKey);
   }, [showModal]);
+
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showModal]);
+
+  useEffect(() => {
+    const handleArrowKeys = (e) => {
+      if (!showImageLightbox || !selectedHelmet?.imagenes) return;
+      
+      if (e.key === 'ArrowLeft') {
+        setCurrentImageIndex(prev => 
+          prev === 0 ? selectedHelmet.imagenes.length - 1 : prev - 1
+        );
+      } else if (e.key === 'ArrowRight') {
+        setCurrentImageIndex(prev => 
+          prev === selectedHelmet.imagenes.length - 1 ? 0 : prev + 1
+        );
+      } else if (e.key === 'Escape') {
+        setShowImageLightbox(false);
+      }
+    };
+
+    if (showImageLightbox) {
+      window.addEventListener('keydown', handleArrowKeys);
+      document.body.style.overflow = 'hidden';
+    }
+    
+    return () => {
+      window.removeEventListener('keydown', handleArrowKeys);
+      document.body.style.overflow = 'unset';
+    };
+  }, [showImageLightbox, selectedHelmet, currentImageIndex]);
 
   useEffect(() => {
     const loadHelmets = async () => {
@@ -314,7 +355,11 @@ export default function Home() {
                             src={img} 
                             alt={`${selectedHelmet.nombre} ${idx + 1}`}
                             className={`${styles.thumbnail} ${selectedImage === img ? styles.thumbnailActive : ''}`}
-                            onClick={() => setSelectedImage(img)}
+                            onClick={() => {
+                              setSelectedImage(img);
+                              setCurrentImageIndex(idx);
+                              setShowImageLightbox(true);
+                            }}
                             style={{ cursor: 'pointer' }}
                           />
                         ))}
@@ -333,6 +378,48 @@ export default function Home() {
                     Consultar Disponibilidad
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Image Lightbox */}
+        {showImageLightbox && selectedHelmet?.imagenes && selectedHelmet.imagenes.length > 0 && (
+          <div className={styles.imageLightbox} onClick={() => setShowImageLightbox(false)}>
+            <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+              <button 
+                onClick={() => setShowImageLightbox(false)}
+                className={styles.lightboxClose}
+              >
+                ✕
+              </button>
+
+              <button 
+                onClick={() => setCurrentImageIndex(prev => 
+                  prev === 0 ? selectedHelmet.imagenes.length - 1 : prev - 1
+                )}
+                className={`${styles.lightboxNavButton} ${styles.prev}`}
+              >
+                ◀
+              </button>
+
+              <img 
+                src={selectedHelmet.imagenes[currentImageIndex]} 
+                alt={`${selectedHelmet.nombre} ${currentImageIndex + 1}`}
+                className={styles.lightboxImage}
+              />
+
+              <button 
+                onClick={() => setCurrentImageIndex(prev => 
+                  prev === selectedHelmet.imagenes.length - 1 ? 0 : prev + 1
+                )}
+                className={`${styles.lightboxNavButton} ${styles.next}`}
+              >
+                ▶
+              </button>
+
+              <div className={styles.lightboxCounter}>
+                {currentImageIndex + 1} / {selectedHelmet.imagenes.length}
               </div>
             </div>
           </div>
