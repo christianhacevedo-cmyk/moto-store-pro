@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { db, auth, storage } from '@/lib/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -27,6 +27,7 @@ export default function AdminPanel() {
     talla: '',
     cantidad: '',
     certificados: [],
+    piloto: '', // Christian o Saturno
     imagen: null,
     imagenes: []
   });
@@ -52,6 +53,7 @@ export default function AdminPanel() {
   const [editingId, setEditingId] = useState(null);
   const [toast, setToast] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedProducts, setSelectedProducts] = useState(new Set()); // Para selección múltiple
   const router = useRouter();
 
   useEffect(() => {
@@ -66,7 +68,31 @@ export default function AdminPanel() {
   useEffect(() => {
     loadProducts();
     loadSales();
-  }, [brandFilter, activeTab]);
+    
+    // Configurar listeners para actualizaciones en tiempo real
+    const unsubscribeProducts = onSnapshot(collection(db, 'proyectoCascos'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setProducts(data);
+      const total = data.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
+      setTotalValue(total);
+    });
+
+    const unsubscribeSales = onSnapshot(collection(db, 'ventas'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setSales(data);
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeSales();
+    };
+  }, []);
 
   useEffect(() => {
     if (toast) {
@@ -137,6 +163,7 @@ export default function AdminPanel() {
           'Fecha': saleDate,
           'Producto': product.nombre || 'N/A',
           'Marca': product.marca || 'N/A',
+          'Piloto': product.piloto || '-',
           'Cantidad': sale.cantidad || 0,
           'Talla': sale.talla || '-',
           'Precio Compra': precioCompra,
@@ -155,6 +182,7 @@ export default function AdminPanel() {
         { wch: 20 },  // Fecha
         { wch: 30 },  // Producto
         { wch: 15 },  // Marca
+        { wch: 15 },  // Piloto
         { wch: 10 },  // Cantidad
         { wch: 10 },  // Talla
         { wch: 12 },  // Precio Compra
@@ -319,6 +347,7 @@ export default function AdminPanel() {
         cantidad: parseFloat(formData.cantidad) || 1,
         descripcion: formData.descripcion || '',
         talla: formData.talla || '',
+        piloto: formData.piloto || '', // Christian o Saturno
         certificados: formData.certificados || [],
       };
 
@@ -387,6 +416,7 @@ export default function AdminPanel() {
       cantidad: product.cantidad || 1,
       descripcion: product.descripcion || '',
       talla: product.talla || '',
+      piloto: product.piloto || '', // Cargar piloto
       certificados: product.certificados || [],
       imagen: null,
       imagenes: []
@@ -407,6 +437,7 @@ export default function AdminPanel() {
       precioCompra: '',
       descripcion: '',
       talla: '',
+      piloto: '', // Resetear piloto
       cantidad: '',
       certificados: [],
       imagen: null,
@@ -466,11 +497,112 @@ export default function AdminPanel() {
       }
       
       await deleteDoc(doc(db, 'proyectoCascos', productId));
-      loadProducts();
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      setSelectedProducts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(productId);
+        return newSet;
+      });
       alert('Casco eliminado exitosamente');
     } catch (error) {
       console.error('Error deleting product:', error);
       alert('Error al eliminar el casco');
+    }
+  };
+
+  const handleDeleteMultiple = async () => {
+    if (selectedProducts.size === 0) return;
+    if (!confirm(`¿Estás seguro de que deseas eliminar ${selectedProducts.size} casco(s)?`)) return;
+
+    setSubmitting(true);
+    try {
+      const productsToDelete = products.filter(p => selectedProducts.has(p.id));
+      
+      for (const product of productsToDelete) {
+        // Eliminar imágenes de storage
+        if (product.imagenes && product.imagenes.length > 0) {
+          for (const url of product.imagenes) {
+            try {
+              const fileRef = ref(storage, url);
+              await deleteObject(fileRef);
+            } catch (err) {
+              console.log('Image already deleted or not found');
+            }
+          }
+        }
+        
+        // Eliminar documento
+        await deleteDoc(doc(db, 'proyectoCascos', product.id));
+      }
+      
+      setProducts(prev => prev.filter(p => !selectedProducts.has(p.id)));
+      setSelectedProducts(new Set());
+      setToast({ type: 'success', message: `✅ ${productsToDelete.length} casco(s) eliminado(s)` });
+    } catch (error) {
+      console.error('Error deleting products:', error);
+      setToast({ type: 'error', message: '❌ Error al eliminar los cascos' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleExportInventoryToExcel = () => {
+    try {
+      if (products.length === 0) {
+        setToast({ type: 'error', message: 'No hay productos para exportar' });
+        return;
+      }
+
+      // Preparar datos para Excel
+      const excelData = products.map(product => ({
+        'Nombre': product.nombre || 'N/A',
+        'Marca': product.marca || 'N/A',
+        'Tipo': product.tipo || '-',
+        'Color': product.color || '-',
+        'Talla': product.talla || '-',
+        'Piloto': product.piloto || '-',
+        'Certificados': (product.certificados || []).join(', ') || '-',
+        'Cantidad': product.cantidad || 0,
+        'Precio Unitario': product.precio || 0,
+        'Precio Compra': product.precioCompra || 0,
+        'Stock Total (S/)': (product.precio || 0) * (product.cantidad || 0),
+        'Descripción': product.descripcion || '-'
+      }));
+
+      // Crear worksheet
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Ajustar ancho de columnas
+      const columnWidths = [
+        { wch: 25 },  // Nombre
+        { wch: 15 },  // Marca
+        { wch: 15 },  // Tipo
+        { wch: 12 },  // Color
+        { wch: 10 },  // Talla
+        { wch: 12 },  // Piloto
+        { wch: 20 },  // Certificados
+        { wch: 12 },  // Cantidad
+        { wch: 15 },  // Precio Unitario
+        { wch: 12 },  // Precio Compra
+        { wch: 15 },  // Stock Total
+        { wch: 30 }   // Descripción
+      ];
+      ws['!cols'] = columnWidths;
+
+      // Crear workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
+
+      // Crear nombre de archivo con fecha
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = `inracing_inventario_${dateStr}.xlsx`;
+
+      // Descargar archivo
+      XLSX.writeFile(wb, filename);
+      setToast({ type: 'success', message: `✅ Exportados ${products.length} productos a Excel` });
+    } catch (error) {
+      console.error('Error exporting inventory to Excel:', error);
+      setToast({ type: 'error', message: '❌ Error al exportar inventario a Excel' });
     }
   };
 
@@ -703,6 +835,16 @@ export default function AdminPanel() {
                   <option value="L">L - Grande</option>
                   <option value="XL">XL - Muy Grande</option>
                 </select>
+                <select
+                  name="piloto"
+                  value={formData.piloto}
+                  onChange={handleInputChange}
+                  className={styles.input}
+                >
+                  <option value="">Seleccionar Piloto</option>
+                  <option value="Christian">Christian</option>
+                  <option value="Saturno">Saturno</option>
+                </select>
               </div>
 
               <div className={styles.formGrid}>
@@ -840,16 +982,35 @@ export default function AdminPanel() {
         <div className={styles.listSection}>
           <div className={styles.listHeader}>
             <h2 className={styles.listTitle}>Inventario ({products.length})</h2>
-            <select
-              value={brandFilter}
-              onChange={(e) => setBrandFilter(e.target.value)}
-              className={styles.brandFilter}
-            >
-              <option value="">Todas las marcas</option>
-              {uniqueBrands.map(brand => (
-                <option key={brand} value={brand}>{brand}</option>
-              ))}
-            </select>
+            <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+              <select
+                value={brandFilter}
+                onChange={(e) => setBrandFilter(e.target.value)}
+                className={styles.brandFilter}
+              >
+                <option value="">Todas las marcas</option>
+                {uniqueBrands.map(brand => (
+                  <option key={brand} value={brand}>{brand}</option>
+                ))}
+              </select>
+              <button 
+                onClick={handleExportInventoryToExcel}
+                className={styles.exportBtn}
+                title="Exportar inventario a Excel"
+              >
+                📊 Exportar Inventario
+              </button>
+              {selectedProducts.size > 0 && (
+                <button 
+                  onClick={handleDeleteMultiple}
+                  className={styles.deleteBtn}
+                  style={{padding: '8px 16px', fontSize: '0.9rem'}}
+                  title="Eliminar seleccionados"
+                >
+                  🗑️ Eliminar {selectedProducts.size}
+                </button>
+              )}
+            </div>
           </div>
 
           {loading ? (
@@ -860,10 +1021,26 @@ export default function AdminPanel() {
             <table className={styles.table}>
               <thead>
                 <tr>
+                  <th style={{width: '40px', textAlign: 'center'}}>
+                    <input
+                      type="checkbox"
+                      checked={selectedProducts.size === products.length && products.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedProducts(new Set(products.map(p => p.id)));
+                        } else {
+                          setSelectedProducts(new Set());
+                        }
+                      }}
+                      style={{cursor: 'pointer', width: '18px', height: '18px'}}
+                      title="Seleccionar todos"
+                    />
+                  </th>
                   <th>IMAGEN</th>
                   <th>NOMBRE</th>
                   <th>MARCA</th>
                   <th>PRECIO</th>
+                  <th>PILOTO</th>
                   <th>STOCK</th>
                   <th>ACCIONES</th>
                 </tr>
@@ -871,6 +1048,22 @@ export default function AdminPanel() {
               <tbody>
                 {products.map(product => (
                   <tr key={product.id}>
+                    <td style={{textAlign: 'center', width: '40px'}}>
+                      <input
+                        type="checkbox"
+                        checked={selectedProducts.has(product.id)}
+                        onChange={(e) => {
+                          const newSet = new Set(selectedProducts);
+                          if (e.target.checked) {
+                            newSet.add(product.id);
+                          } else {
+                            newSet.delete(product.id);
+                          }
+                          setSelectedProducts(newSet);
+                        }}
+                        style={{cursor: 'pointer', width: '18px', height: '18px'}}
+                      />
+                    </td>
                     <td>
                       {product.imagen && (
                         <img src={product.imagen} alt={product.nombre} className={styles.tableImg} />
@@ -882,6 +1075,9 @@ export default function AdminPanel() {
                     </td>
                     <td>{product.marca}</td>
                     <td className={styles.priceCell}>S/ {product.precio}</td>
+                    <td style={{fontWeight: '500', color: '#ff9159'}}>
+                      {product.piloto || '-'}
+                    </td>
                     <td>
                       <span className={`${styles.stockBadge} ${parseFloat(product.cantidad) < 5 ? styles.stockBadgeLow : ''}`}>
                         {parseFloat(product.cantidad) >= 5 ? 'En Stock' : 'Bajo Stock'} ({product.cantidad || 1})
