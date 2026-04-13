@@ -20,12 +20,13 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [showImageLightbox, setShowImageLightbox] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [hoveredHelmetId, setHoveredHelmetId] = useState(null); // Change 9: Para efectos hover
   
   const [filters, setFilters] = useState({
     nombre: '',
     marca: '',
     tipo: '',
-    priceRange: 'all'
+    priceMax: 500
   });
 
   useEffect(() => {
@@ -148,9 +149,8 @@ export default function Home() {
       filtered = filtered.filter(h => h.tipo?.toLowerCase().includes(filters.tipo.toLowerCase()));
     }
 
-    if (filters.priceRange !== 'all') {
-      const [min, max] = filters.priceRange.split('-').map(Number);
-      filtered = filtered.filter(h => h.precio >= min && (max === Infinity ? true : h.precio <= max));
+    if (filters.priceMax) {
+      filtered = filtered.filter(h => h.precio <= filters.priceMax);
     }
 
     setFilteredHelmets(filtered);
@@ -162,7 +162,7 @@ export default function Home() {
   };
 
   const resetFilters = () => {
-    setFilters({ nombre: '', marca: '', tipo: '', priceRange: 'all' });
+    setFilters({ nombre: '', marca: '', tipo: '', priceMax: 500 });
   };
 
   const uniqueMarcas = [...new Set(helmets.map(h => h.marca).filter(Boolean))];
@@ -206,7 +206,7 @@ export default function Home() {
                   onChange={handleFilterChange}
                   className={styles.filterSelect}
                 >
-                  <option value="">Todas</option>
+                  <option value="">Todas las marcas</option>
                   {uniqueMarcas.map(marca => (
                     <option key={marca} value={marca}>{marca}</option>
                   ))}
@@ -221,7 +221,7 @@ export default function Home() {
                   onChange={handleFilterChange}
                   className={styles.filterSelect}
                 >
-                  <option value="">Todos</option>
+                  <option value="">Todos los tipos</option>
                   {uniqueTipos.map(tipo => (
                     <option key={tipo} value={tipo}>{tipo}</option>
                   ))}
@@ -229,18 +229,18 @@ export default function Home() {
               </div>
 
               <div className={styles.filterGroup}>
-                <label className={styles.filterLabel}>Rango de Precio</label>
+                <label className={styles.filterLabel}>Precio Máximo</label>
                 <select 
-                  name="priceRange" 
-                  value={filters.priceRange}
+                  name="priceMax" 
+                  value={filters.priceMax}
                   onChange={handleFilterChange}
                   className={styles.filterSelect}
                 >
-                  <option value="all">Todos los precios</option>
-                  <option value="0-200">S/ 0 - S/ 200</option>
-                  <option value="200-500">S/ 200 - S/ 500</option>
-                  <option value="500-1000">S/ 500 - S/ 1000</option>
-                  <option value="1000-Infinity">S/ 1000+</option>
+                  <option value="500">Hasta S/ 500</option>
+                  <option value="100">Hasta S/ 100</option>
+                  <option value="200">Hasta S/ 200</option>
+                  <option value="300">Hasta S/ 300</option>
+                  <option value="400">Hasta S/ 400</option>
                 </select>
               </div>
 
@@ -293,6 +293,17 @@ export default function Home() {
                       setShowModal(true);
                     }}
                     className={styles.cardWrapper}
+                    onMouseEnter={() => setHoveredHelmetId(helmet.id)}
+                    onMouseLeave={() => setHoveredHelmetId(null)}
+                    style={{
+                      transform: hoveredHelmetId === helmet.id ? 'scale(1.05)' : 'scale(1)',
+                      boxShadow: hoveredHelmetId === helmet.id 
+                        ? '0 16px 32px rgba(0, 0, 0, 0.15)' 
+                        : '0 4px 12px rgba(0, 0, 0, 0.08)',
+                      transition: 'all 0.3s ease',
+                      borderRadius: '12px',
+                      cursor: 'pointer'
+                    }}
                   >
                     <HelmetCard 
                       helmet={helmet}
