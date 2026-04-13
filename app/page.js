@@ -87,6 +87,27 @@ export default function Home() {
   }, [showImageLightbox, selectedHelmet, currentImageIndex]);
 
   useEffect(() => {
+    const deduplicateHelmets = (helmets) => {
+      /*
+      Deduplica cascos que tengan el mismo nombre, marca y color.
+      Mantiene solo el primero encontrado.
+      Esto permite que haya múltiples registros en la DB (para diferentes pilotos)
+      pero solo se muestra 1 en el catálogo.
+      */
+      const seen = new Set();
+      const deduplicated = [];
+
+      for (const helmet of helmets) {
+        const key = `${helmet.nombre || ''}|${helmet.marca || ''}|${helmet.color || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduplicated.push(helmet);
+        }
+      }
+
+      return deduplicated;
+    };
+
     const loadHelmets = async () => {
       try {
         setLoading(true);
@@ -96,8 +117,12 @@ export default function Home() {
           id: doc.id,
           ...doc.data(),
         }));
-        setHelmets(data);
-        setFilteredHelmets(data);
+        
+        // Deduplicar antes de mostrar
+        const deduplicatedData = deduplicateHelmets(data);
+        
+        setHelmets(deduplicatedData);
+        setFilteredHelmets(deduplicatedData);
       } catch (error) {
         console.error('Error loading helmets:', error);
       } finally {

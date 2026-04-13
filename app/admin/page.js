@@ -24,7 +24,7 @@ export default function AdminPanel() {
     precio: '',
     precioCompra: '',
     descripcion: '',
-    talla: '',
+    talla: [], // Ahora es array para múltiples tallas
     cantidad: '',
     certificados: [],
     piloto: '', // Christian o Saturno
@@ -283,6 +283,27 @@ export default function AdminPanel() {
     });
   };
 
+  const handleTallaToggle = (talla) => {
+    setFormData(prev => {
+      const currentTallas = prev.talla || [];
+      const index = currentTallas.indexOf(talla);
+      let newTallas;
+
+      if (index > -1) {
+        // Remover si ya existe
+        newTallas = currentTallas.filter((_, i) => i !== index);
+      } else {
+        // Agregar si no existe
+        newTallas = [...currentTallas, talla];
+      }
+
+      return {
+        ...prev,
+        talla: newTallas
+      };
+    });
+  };
+
   const handleImageSelect = (e) => {
     const files = Array.from(e.target.files);
     setFormData(prev => ({
@@ -321,6 +342,54 @@ export default function AdminPanel() {
     return urls;
   };
 
+  const verificarDuplicado = async (nombre, marca, color, pilotos = []) => {
+    /*
+    Verifica si existe un casco con el mismo nombre, marca y color.
+    Si existe con un piloto diferente, permite agregarlo pero lo marca como inventario_solo.
+    Retorna: { existeDuplicado: bool, mensaje: string, soloInventario: bool }
+    */
+    try {
+      const q = query(
+        collection(db, 'proyectoCascos'),
+        where('nombre', '==', nombre),
+        where('marca', '==', marca),
+        where('color', '==', color)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        // No existe duplicado
+        return { existeDuplicado: false, mensaje: '', soloInventario: false };
+      }
+
+      // Existe al menos uno
+      const existentes = querySnapshot.docs.map(doc => doc.data());
+      
+      // Verificar si el piloto es diferente
+      const pilotoActual = pilotos[0] || ''; // Obtener primer piloto del array
+      const existePilotoIgual = existentes.some(e => e.piloto === pilotoActual);
+
+      if (existePilotoIgual) {
+        // Existe con el mismo piloto = error
+        return { 
+          existeDuplicado: true, 
+          mensaje: 'Casco ya existe, debes actualizar',
+          soloInventario: false 
+        };
+      } else {
+        // Existe pero con diferente piloto = permitir pero solo inventario
+        return { 
+          existeDuplicado: false, 
+          mensaje: '', 
+          soloInventario: true 
+        };
+      }
+    } catch (error) {
+      console.error('Error verifying duplicate:', error);
+      return { existeDuplicado: false, mensaje: '', soloInventario: false };
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.nombre || !formData.marca || !formData.precio) {
@@ -330,6 +399,27 @@ export default function AdminPanel() {
 
     setSubmitting(true);
     try {
+      // En modo de creación, verificar duplicados
+      if (!editingId) {
+        const { existeDuplicado, mensaje, soloInventario } = await verificarDuplicado(
+          formData.nombre,
+          formData.marca,
+          formData.color,
+          formData.piloto ? [formData.piloto] : []
+        );
+
+        if (existeDuplicado) {
+          setToast({ type: 'error', message: `❌ ${mensaje}` });
+          setSubmitting(false);
+          return;
+        }
+
+        // Si es solo inventario (diferente piloto), agregar flag
+        if (soloInventario) {
+          // Esto será manejado en la estructura de datos
+        }
+      }
+
       let imageUrls = [];
       
       // Solo subir imágenes si hay nuevas seleccionadas
@@ -346,7 +436,7 @@ export default function AdminPanel() {
         precioCompra: parseFloat(formData.precioCompra) || 0,
         cantidad: parseFloat(formData.cantidad) || 1,
         descripcion: formData.descripcion || '',
-        talla: formData.talla || '',
+        talla: Array.isArray(formData.talla) ? formData.talla : [], // Guardar como array
         piloto: formData.piloto || '', // Christian o Saturno
         certificados: formData.certificados || [],
       };
@@ -389,7 +479,7 @@ export default function AdminPanel() {
         precio: '',
         precioCompra: '',
         descripcion: '',
-        talla: '',
+        talla: [], // Array vacío para tallas
         cantidad: '',
         certificados: [],
         imagen: null,
@@ -415,7 +505,7 @@ export default function AdminPanel() {
       precioCompra: product.precioCompra || '',
       cantidad: product.cantidad || 1,
       descripcion: product.descripcion || '',
-      talla: product.talla || '',
+      talla: Array.isArray(product.talla) ? product.talla : (product.talla ? [product.talla] : []),
       piloto: product.piloto || '', // Cargar piloto
       certificados: product.certificados || [],
       imagen: null,
@@ -436,7 +526,7 @@ export default function AdminPanel() {
       precio: '',
       precioCompra: '',
       descripcion: '',
-      talla: '',
+      talla: [], // Array vacío
       piloto: '', // Resetear piloto
       cantidad: '',
       certificados: [],
@@ -559,7 +649,7 @@ export default function AdminPanel() {
         'Marca': product.marca || 'N/A',
         'Tipo': product.tipo || '-',
         'Color': product.color || '-',
-        'Talla': product.talla || '-',
+        'Talla': Array.isArray(product.talla) ? product.talla.join(', ') || '-' : product.talla || '-',
         'Piloto': product.piloto || '-',
         'Certificados': (product.certificados || []).join(', ') || '-',
         'Cantidad': product.cantidad || 0,
@@ -823,18 +913,47 @@ export default function AdminPanel() {
               </div>
 
               <div className={styles.formGrid}>
-                <select
-                  name="talla"
-                  value={formData.talla}
-                  onChange={handleInputChange}
-                  className={styles.input}
-                >
-                  <option value="">Seleccionar talla</option>
-                  <option value="S">S - Pequeño</option>
-                  <option value="M">M - Mediano</option>
-                  <option value="L">L - Grande</option>
-                  <option value="XL">XL - Muy Grande</option>
-                </select>
+                <div style={{gridColumn: '1 / -1'}}>
+                  <label className={styles.filterLabel}>Tallas Disponibles</label>
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginTop: '12px'}}>
+                    {['S', 'M', 'L', 'XL'].map(talla => (
+                      <div
+                        key={talla}
+                        onClick={() => handleTallaToggle(talla)}
+                        style={{
+                          padding: '16px',
+                          border: formData.talla?.includes(talla) ? '2px solid #ff9159' : '2px solid rgba(255, 145, 89, 0.2)',
+                          borderRadius: '8px',
+                          backgroundColor: formData.talla?.includes(talla) ? 'rgba(255, 145, 89, 0.1)' : 'var(--bg-tertiary)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '12px',
+                          transition: 'all 0.3s ease',
+                          userSelect: 'none'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.talla?.includes(talla) || false}
+                          onChange={() => handleTallaToggle(talla)}
+                          style={{cursor: 'pointer', width: '20px', height: '20px'}}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <div style={{fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.95rem'}}>
+                          {talla === 'S' ? 'S (Pequeño)' : talla === 'M' ? 'M (Mediano)' : talla === 'L' ? 'L (Grande)' : 'XL (Muy Grande)'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{marginTop: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)'}}>
+                    Seleccionadas: {formData.talla?.length || 0} tallas
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.formGrid}>
                 <select
                   name="piloto"
                   value={formData.piloto}
@@ -1071,7 +1190,7 @@ export default function AdminPanel() {
                     </td>
                     <td className={styles.nameCell}>
                       <div>{product.nombre}</div>
-                      <div className={styles.productMeta}>{product.tipo} • {product.talla || 'N/A'}</div>
+                      <div className={styles.productMeta}>{product.tipo} • {Array.isArray(product.talla) ? product.talla.join(', ') || 'N/A' : product.talla || 'N/A'}</div>
                     </td>
                     <td>{product.marca}</td>
                     <td className={styles.priceCell}>S/ {product.precio}</td>
