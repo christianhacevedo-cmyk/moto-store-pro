@@ -54,6 +54,8 @@ export default function AdminPanel() {
   const [toast, setToast] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedProducts, setSelectedProducts] = useState(new Set()); // Para selección múltiple
+  const [marcasSugeridas, setMarcasSugeridas] = useState([]); // Para autocompletado
+  const [duplicadoEncontrado, setDuplicadoEncontrado] = useState(null); // Para búsqueda en tiempo real
   const router = useRouter();
 
   useEffect(() => {
@@ -66,7 +68,6 @@ export default function AdminPanel() {
   }, [router]);
 
   useEffect(() => {
-    loadProducts();
     loadSales();
     
     // Configurar listeners para actualizaciones en tiempo real
@@ -75,9 +76,14 @@ export default function AdminPanel() {
         id: doc.id,
         ...doc.data()
       }));
+      
       setProducts(data);
+      setLoading(false);
       const total = data.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
       setTotalValue(total);
+    }, (error) => {
+      console.error('Error en listener de produtos:', error);
+      setLoading(false);
     });
 
     const unsubscribeSales = onSnapshot(collection(db, 'ventas'), (snapshot) => {
@@ -211,6 +217,20 @@ export default function AdminPanel() {
     }
   };
 
+  // Filtrar productos localmente por marca (sin re-query a Firestore)
+  const getFilteredProducts = () => {
+    if (brandFilter) {
+      return products.filter(p => p.marca === brandFilter);
+    }
+    return products;
+  };
+
+  const filteredProducts = getFilteredProducts();
+  const uniqueBrands = [...new Set(products.map(p => p.marca).filter(Boolean))];
+  const inStockCount = filteredProducts.reduce((sum, p) => sum + (parseFloat(p.cantidad) || 1), 0);
+  const lowStockCount = filteredProducts.filter(p => (parseFloat(p.cantidad) || 1) < 5).length;
+  const totalValueFiltered = filteredProducts.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
+
   const loadProducts = async () => {
     try {
       setLoading(true);
@@ -256,6 +276,34 @@ export default function AdminPanel() {
       ...prev,
       [name]: value
     }));
+
+    // Change 2: Sugerencias de marca
+    if (name === 'marca') {
+      const uniqueMarcas = [...new Set(products.map(p => p.marca).filter(Boolean))];
+      const sugeridas = uniqueMarcas.filter(m => 
+        m.toLowerCase().includes(value.toLowerCase())
+      );
+      setMarcasSugeridas(sugeridas);
+    }
+
+    // Change 5: Búsqueda de duplicados en tiempo real
+    if (name === 'nombre' || name === 'marca' || name === 'color') {
+      const currentNombre = name === 'nombre' ? value : formData.nombre;
+      const currentMarca = name === 'marca' ? value : formData.marca;
+      const currentColor = name === 'color' ? value : formData.color;
+
+      if (currentNombre && currentMarca && currentColor) {
+        const duplicado = products.find(p => 
+          p.nombre === currentNombre && 
+          p.marca === currentMarca && 
+          p.color === currentColor &&
+          p.id !== editingId // No contar si estamos editando el mismo
+        );
+        setDuplicadoEncontrado(duplicado || null);
+      } else {
+        setDuplicadoEncontrado(null);
+      }
+    }
   };
 
   const handleCertificateToggle = (certificate) => {
@@ -281,6 +329,15 @@ export default function AdminPanel() {
         certificados: newCerts
       };
     });
+  };
+
+  // Change 3: Calcular ganancia
+  const calcularGanancia = () => {
+    const precio = parseFloat(formData.precio) || 0;
+    const precioCompra = parseFloat(formData.precioCompra) || 0;
+    const ganancia = precio - precioCompra;
+    const margen = precioCompra > 0 ? ((ganancia / precioCompra) * 100).toFixed(2) : 0;
+    return { ganancia, margen };
   };
 
   const handleTallaToggle = (talla) => {
@@ -458,16 +515,13 @@ export default function AdminPanel() {
         setToast({ type: 'success', message: '✅ Casco actualizado exitosamente' });
       } else {
         // Modo de creación
-        imageUrls = await uploadImagesToStorage(formData.imagenes);
         data.imagen = imageUrls.length > 0 ? imageUrls[0] : '';
         data.imagenes = imageUrls;
         data.imagenPaths = imageUrls;
         data.createdAt = new Date().toISOString();
-        const newDoc = await addDoc(collection(db, 'proyectoCascos'), data);
+        await addDoc(collection(db, 'proyectoCascos'), data);
         
-        // Agregar el nuevo producto al state directamente
-        setProducts(prev => [{ id: newDoc.id, ...data }, ...prev]);
-        
+        // El listener onSnapshot se encargará de actualizar el estado automáticamente
         setToast({ type: 'success', message: '✅ Casco agregado exitosamente' });
       }
 
@@ -577,6 +631,7 @@ export default function AdminPanel() {
     if (!confirm('¿Estás seguro de que deseas eliminar este casco?')) return;
 
     try {
+      // Eliminar imágenes de storage
       for (const url of imageUrls) {
         try {
           const fileRef = ref(storage, url);
@@ -586,17 +641,20 @@ export default function AdminPanel() {
         }
       }
       
+      // Eliminar documento - el listener automáticamente sincronizará
       await deleteDoc(doc(db, 'proyectoCascos', productId));
-      setProducts(prev => prev.filter(p => p.id !== productId));
+      
+      // Limpiar selección si estaba seleccionado
       setSelectedProducts(prev => {
         const newSet = new Set(prev);
         newSet.delete(productId);
         return newSet;
       });
-      alert('Casco eliminado exitosamente');
+      
+      setToast({ type: 'success', message: '✅ Casco eliminado exitosamente' });
     } catch (error) {
       console.error('Error deleting product:', error);
-      alert('Error al eliminar el casco');
+      setToast({ type: 'error', message: '❌ Error al eliminar el casco' });
     }
   };
 
@@ -608,6 +666,7 @@ export default function AdminPanel() {
     try {
       const productsToDelete = products.filter(p => selectedProducts.has(p.id));
       
+      // Eliminar cada producto
       for (const product of productsToDelete) {
         // Eliminar imágenes de storage
         if (product.imagenes && product.imagenes.length > 0) {
@@ -621,11 +680,11 @@ export default function AdminPanel() {
           }
         }
         
-        // Eliminar documento
+        // Eliminar documento - el listener automáticamente sincronizará
         await deleteDoc(doc(db, 'proyectoCascos', product.id));
       }
       
-      setProducts(prev => prev.filter(p => !selectedProducts.has(p.id)));
+      // Limpiar selección
       setSelectedProducts(new Set());
       setToast({ type: 'success', message: `✅ ${productsToDelete.length} casco(s) eliminado(s)` });
     } catch (error) {
@@ -638,13 +697,13 @@ export default function AdminPanel() {
 
   const handleExportInventoryToExcel = () => {
     try {
-      if (products.length === 0) {
+      if (filteredProducts.length === 0) {
         setToast({ type: 'error', message: 'No hay productos para exportar' });
         return;
       }
 
       // Preparar datos para Excel
-      const excelData = products.map(product => ({
+      const excelData = filteredProducts.map(product => ({
         'Nombre': product.nombre || 'N/A',
         'Marca': product.marca || 'N/A',
         'Tipo': product.tipo || '-',
@@ -689,7 +748,7 @@ export default function AdminPanel() {
 
       // Descargar archivo
       XLSX.writeFile(wb, filename);
-      setToast({ type: 'success', message: `✅ Exportados ${products.length} productos a Excel` });
+      setToast({ type: 'success', message: `✅ Exportados ${filteredProducts.length} productos a Excel` });
     } catch (error) {
       console.error('Error exporting inventory to Excel:', error);
       setToast({ type: 'error', message: '❌ Error al exportar inventario a Excel' });
@@ -794,13 +853,10 @@ export default function AdminPanel() {
     }
   };
 
-  const uniqueBrands = [...new Set(products.map(p => p.marca).filter(Boolean))];
-  const inStockCount = products.reduce((sum, p) => sum + (parseFloat(p.cantidad) || 1), 0);
-  const lowStockCount = products.filter(p => (parseFloat(p.cantidad) || 1) < 5).length;
-
   if (!adminUser) {
     return <div>Cargando...</div>;
   }
+
 
   return (
     <div className={styles.adminContainer}>
@@ -862,15 +918,50 @@ export default function AdminPanel() {
                 />
               </div>
 
+              {/* Change 2: Mostrar sugerencias de marca */}
+              {marcasSugeridas.length > 0 && formData.marca && (
+                <div style={{
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid rgba(255, 145, 89, 0.3)',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  maxHeight: '150px',
+                  overflowY: 'auto'
+                }}>
+                  {marcasSugeridas.map(marca => (
+                    <div
+                      key={marca}
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, marca }));
+                        setMarcasSugeridas([]);
+                      }}
+                      style={{
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid rgba(255, 145, 89, 0.1)',
+                        fontSize: '0.9rem'
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255, 145, 89, 0.1)'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                    >
+                      {marca}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className={styles.formGrid}>
-                <input
-                  type="text"
+                {/* Change 4: Tipo como select con ABATIBLE e INTEGRAL */}
+                <select
                   name="tipo"
-                  placeholder="Tipo (ej. Full Face, Half)"
                   value={formData.tipo}
                   onChange={handleInputChange}
                   className={styles.input}
-                />
+                >
+                  <option value="">Seleccionar tipo</option>
+                  <option value="ABATIBLE">ABATIBLE</option>
+                  <option value="INTEGRAL">INTEGRAL</option>
+                </select>
                 <input
                   type="text"
                   name="color"
@@ -880,6 +971,25 @@ export default function AdminPanel() {
                   className={styles.input}
                 />
               </div>
+
+              {/* Change 5: Mostrar si existe duplicado */}
+              {duplicadoEncontrado && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                  border: '2px solid #ff6b6b',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  fontSize: '0.9rem',
+                  color: '#ff6b6b',
+                  fontWeight: '500'
+                }}>
+                  ⚠️ <strong>Casco duplicado encontrado:</strong> {duplicadoEncontrado.nombre} ({duplicadoEncontrado.piloto || 'Sin piloto'})
+                  <div style={{fontSize: '0.85rem', marginTop: '4px', opacity: 0.8}}>
+                    Deberías actualizar en lugar de crear uno nuevo
+                  </div>
+                </div>
+              )}
 
               <div className={styles.formGrid}>
                 <input
@@ -912,24 +1022,54 @@ export default function AdminPanel() {
                 />
               </div>
 
+              {/* Change 3: Mostrar ganancia e instantáneamente */}
+              {formData.precio && formData.precioCompra && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                  border: '2px solid #4caf50',
+                  borderRadius: '8px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+                    <div>
+                      <div style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Ganancia Unitaria</div>
+                      <div style={{fontSize: '1.4rem', fontWeight: '700', color: '#4caf50', marginTop: '4px'}}>
+                        S/ {calcularGanancia().ganancia.toFixed(2)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Margen de Ganancia</div>
+                      <div style={{fontSize: '1.4rem', fontWeight: '700', color: '#4caf50', marginTop: '4px'}}>
+                        {calcularGanancia().margen}%
+                      </div>
+                    </div>
+                  </div>
+                  {calcularGanancia().ganancia <= 0 && (
+                    <div style={{color: '#ff6b6b', fontSize: '0.9rem', marginTop: '8px'}}>
+                      ⚠️ El precio de venta debe ser mayor que el de compra
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className={styles.formGrid}>
                 <div style={{gridColumn: '1 / -1'}}>
                   <label className={styles.filterLabel}>Tallas Disponibles</label>
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginTop: '12px'}}>
-                    {['S', 'M', 'L', 'XL'].map(talla => (
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px'}}>
+                    {['S', 'M', 'L', 'XL', 'XXL'].map(talla => (
                       <div
                         key={talla}
                         onClick={() => handleTallaToggle(talla)}
                         style={{
-                          padding: '16px',
+                          padding: '14px',
                           border: formData.talla?.includes(talla) ? '2px solid #ff9159' : '2px solid rgba(255, 145, 89, 0.2)',
                           borderRadius: '8px',
                           backgroundColor: formData.talla?.includes(talla) ? 'rgba(255, 145, 89, 0.1)' : 'var(--bg-tertiary)',
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '12px',
+                          gap: '10px',
                           transition: 'all 0.3s ease',
                           userSelect: 'none'
                         }}
@@ -938,11 +1078,11 @@ export default function AdminPanel() {
                           type="checkbox"
                           checked={formData.talla?.includes(talla) || false}
                           onChange={() => handleTallaToggle(talla)}
-                          style={{cursor: 'pointer', width: '20px', height: '20px'}}
+                          style={{cursor: 'pointer', width: '20px', height: '20px', flexShrink: 0}}
                           onClick={(e) => e.stopPropagation()}
                         />
-                        <div style={{fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.95rem'}}>
-                          {talla === 'S' ? 'S (Pequeño)' : talla === 'M' ? 'M (Mediano)' : talla === 'L' ? 'L (Grande)' : 'XL (Muy Grande)'}
+                        <div style={{fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.9rem'}}>
+                          {talla === 'S' ? 'S (Pequeño)' : talla === 'M' ? 'M (Mediano)' : talla === 'L' ? 'L (Grande)' : talla === 'XL' ? 'XL (Muy Grande)' : 'XXL (Extra Grande)'}
                         </div>
                       </div>
                     ))}
@@ -1082,7 +1222,7 @@ export default function AdminPanel() {
 
               <div className={styles.stockSummary}>
                 <div className={styles.summaryTitle}>Total Stock Value</div>
-                <div className={styles.summaryValue}>S/ {totalValue.toFixed(2)}</div>
+                <div className={styles.summaryValue}>S/ {totalValueFiltered.toFixed(2)}</div>
                 <div className={styles.summaryStats}>
                   <div className={styles.statItem}>
                     <span className={styles.statLabel}>Unidades Totales</span>
@@ -1100,7 +1240,7 @@ export default function AdminPanel() {
 
         <div className={styles.listSection}>
           <div className={styles.listHeader}>
-            <h2 className={styles.listTitle}>Inventario ({products.length})</h2>
+            <h2 className={styles.listTitle}>Inventario ({filteredProducts.length})</h2>
             <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
               <select
                 value={brandFilter}
@@ -1134,7 +1274,7 @@ export default function AdminPanel() {
 
           {loading ? (
             <p>Cargando...</p>
-          ) : products.length === 0 ? (
+          ) : filteredProducts.length === 0 ? (
             <p>No hay cascos disponibles</p>
           ) : (
             <table className={styles.table}>
@@ -1143,10 +1283,10 @@ export default function AdminPanel() {
                   <th style={{width: '40px', textAlign: 'center'}}>
                     <input
                       type="checkbox"
-                      checked={selectedProducts.size === products.length && products.length > 0}
+                      checked={selectedProducts.size === filteredProducts.length && filteredProducts.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedProducts(new Set(products.map(p => p.id)));
+                          setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
                         } else {
                           setSelectedProducts(new Set());
                         }
@@ -1165,7 +1305,7 @@ export default function AdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {products.map(product => (
+                {filteredProducts.map(product => (
                   <tr key={product.id}>
                     <td style={{textAlign: 'center', width: '40px'}}>
                       <input
