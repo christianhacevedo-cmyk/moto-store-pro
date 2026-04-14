@@ -127,6 +127,14 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  width: 100%;
+}
+
+.cantidadTallaGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
 }
 
 .input,
@@ -138,6 +146,8 @@
   color: var(--text-primary);
   font-size: 0.9rem;
   transition: all 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .input:focus,

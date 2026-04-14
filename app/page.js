@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
-import { collection, getDocs, query } from 'firebase/firestore';
+import { collection, getDocs, query, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import Link from 'next/link';
 import Header from '@/components/Header';
@@ -109,29 +109,47 @@ export default function Home() {
       return deduplicated;
     };
 
-    const loadHelmets = async () => {
+    const loadHelmets = () => {
       try {
         setLoading(true);
         const q = query(collection(db, 'proyectoCascos'));
-        const querySnapshot = await getDocs(q);
-        const data = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
         
-        // Deduplicar antes de mostrar
-        const deduplicatedData = deduplicateHelmets(data);
-        
-        setHelmets(deduplicatedData);
-        setFilteredHelmets(deduplicatedData);
+        // Usar onSnapshot para listener en tiempo real
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const data = querySnapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          
+          // Ordenar por campo "orden" si existe
+          data.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+          
+          // Deduplicar antes de mostrar
+          const deduplicatedData = deduplicateHelmets(data);
+          
+          setHelmets(deduplicatedData);
+          setFilteredHelmets(deduplicatedData);
+          setLoading(false);
+        }, (error) => {
+          console.error('Error loading helmets:', error);
+          setLoading(false);
+        });
+
+        // Retornar unsubscribe para limpiar el listener
+        return unsubscribe;
       } catch (error) {
-        console.error('Error loading helmets:', error);
-      } finally {
+        console.error('Error setting up helmet listener:', error);
         setLoading(false);
+        return null;
       }
     };
 
-    loadHelmets();
+    const unsubscribe = loadHelmets();
+    return () => {
+      if (unsubscribe instanceof Function) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -152,6 +170,9 @@ export default function Home() {
     if (filters.priceMax) {
       filtered = filtered.filter(h => h.precio <= filters.priceMax);
     }
+
+    // Mantener el orden original
+    filtered.sort((a, b) => (a.orden || 0) - (b.orden || 0));
 
     setFilteredHelmets(filtered);
   }, [filters, helmets]);

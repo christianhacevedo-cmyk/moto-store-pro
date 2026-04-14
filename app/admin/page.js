@@ -25,11 +25,12 @@ export default function AdminPanel() {
     precioCompra: '',
     descripcion: '',
     talla: [], // Ahora es array para múltiples tallas
-    cantidad: '',
+    cantidad: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 }, // Cantidades por talla
     certificados: [],
     piloto: '', // Christian o Saturno
     imagen: null,
-    imagenes: []
+    imagenes: [],
+    orden: 0 // Para drag & drop en catálogo
   });
   
   // Estado para ventas
@@ -39,6 +40,7 @@ export default function AdminPanel() {
     talla: '',
     precioUnitario: ''
   });
+  const [editingSaleId, setEditingSaleId] = useState(null); // Para editar venta
 
   const [salesDateFilter, setSalesDateFilter] = useState('todos'); // 'todos', 'hora', 'dia', 'semana', 'mes'
   
@@ -47,6 +49,8 @@ export default function AdminPanel() {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
   const [brandFilter, setBrandFilter] = useState('');
+  const [pilotoFilter, setPilotoFilter] = useState(''); // Nuevo filtro por piloto
+  const [ventasFilter, setVentasFilter] = useState(''); // Filtro de ventas por piloto
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [totalValue, setTotalValue] = useState(0);
@@ -56,6 +60,7 @@ export default function AdminPanel() {
   const [selectedProducts, setSelectedProducts] = useState(new Set()); // Para selección múltiple
   const [marcasSugeridas, setMarcasSugeridas] = useState([]); // Para autocompletado
   const [duplicadoEncontrado, setDuplicadoEncontrado] = useState(null); // Para búsqueda en tiempo real
+  const [draggedProductId, setDraggedProductId] = useState(null); // Para drag & drop de cascos
   const router = useRouter();
 
   useEffect(() => {
@@ -77,7 +82,10 @@ export default function AdminPanel() {
       
       setProducts(data);
       setLoading(false);
-      const total = data.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
+      const total = data.reduce((sum, product) => {
+        const qty = getTotalQuantity(product);
+        return sum + (parseFloat(product.precio) || 0) * qty;
+      }, 0);
       setTotalValue(total);
     }, (error) => {
       console.error('Error en listener de produtos:', error);
@@ -147,9 +155,36 @@ export default function AdminPanel() {
     });
   };
 
+  const getFilteredSalesByPiloto = () => {
+    let filtered = getFilteredSales();
+    
+    if (ventasFilter) {
+      filtered = filtered.filter(sale => sale.piloto === ventasFilter);
+    }
+    
+    return filtered;
+  };
+
+  // Obtener ganancia con descuento aplicado para Christian
+  const getGananciaWithDiscount = (sale) => {
+    const product = products.find(p => p.id === sale.productoId);
+    if (!product) return 0;
+
+    const precioCompra = product.precioCompra || 0;
+    const precioVenta = sale.precioUnitario || 0;
+    let gananciaUnitaria = precioVenta - precioCompra;
+
+    // Aplicar descuento de -20 soles solo para piloto Christian
+    if (sale.piloto === 'Christian') {
+      gananciaUnitaria -= 20;
+    }
+
+    return gananciaUnitaria * (sale.cantidad || 1);
+  };
+
   const handleExportToExcel = () => {
     try {
-      const filteredSales = getFilteredSales();
+      const filteredSales = getFilteredSalesByPiloto();
       if (filteredSales.length === 0) {
         setToast({ type: 'error', message: 'No hay ventas para exportar' });
         return;
@@ -161,7 +196,12 @@ export default function AdminPanel() {
         const saleDate = new Date(sale.createdAt).toLocaleString('es-PE');
         const precioCompra = product.precioCompra || 0;
         const precioVenta = sale.precioUnitario || 0;
-        const ganancia = (precioVenta - precioCompra) * (sale.cantidad || 1);
+        let ganancia = (precioVenta - precioCompra) * (sale.cantidad || 1);
+        
+        // Aplicar descuento para Christian
+        if (sale.piloto === 'Christian') {
+          ganancia -= (20 * (sale.cantidad || 1));
+        }
         
         return {
           'Fecha': saleDate,
@@ -174,7 +214,8 @@ export default function AdminPanel() {
           'Precio Venta': precioVenta,
           'Ganancia Unitaria': precioVenta - precioCompra,
           'Total Venta': sale.total || 0,
-          'Total Ganancia': ganancia.toFixed(2)
+          'Total Ganancia': ganancia.toFixed(2),
+          'Descuento Christian': sale.piloto === 'Christian' ? `-20 x ${sale.cantidad}` : '-'
         };
       });
 
@@ -193,7 +234,8 @@ export default function AdminPanel() {
         { wch: 12 },  // Precio Venta
         { wch: 18 },  // Ganancia Unitaria
         { wch: 12 },  // Total Venta
-        { wch: 15 }   // Total Ganancia
+        { wch: 15 },  // Total Ganancia
+        { wch: 15 }   // Descuento Christian
       ];
       ws['!cols'] = columnWidths;
 
@@ -203,7 +245,7 @@ export default function AdminPanel() {
 
       // Crear nombre de archivo con fecha y filtro
       const dateStr = new Date().toISOString().split('T')[0];
-      const filterStr = salesDateFilter === 'todos' ? 'todas' : salesDateFilter;
+      const filterStr = ventasFilter ? ventasFilter : (salesDateFilter === 'todos' ? 'todas' : salesDateFilter);
       const filename = `inracing_ventas_${filterStr}_${dateStr}.xlsx`;
 
       // Descargar archivo
@@ -215,19 +257,97 @@ export default function AdminPanel() {
     }
   };
 
-  // Filtrar productos localmente por marca (sin re-query a Firestore)
+  // Filtrar productos localmente por marca y piloto (sin re-query a Firestore)
   const getFilteredProducts = () => {
+    let filtered = products;
+    
     if (brandFilter) {
-      return products.filter(p => p.marca === brandFilter);
+      filtered = filtered.filter(p => p.marca === brandFilter);
     }
-    return products;
+    
+    if (pilotoFilter) {
+      filtered = filtered.filter(p => p.piloto === pilotoFilter);
+    }
+    
+    return filtered;
+  };
+
+  // Obtener cantidad total de un producto (suma de todas las tallas)
+  const getTotalQuantity = (product) => {
+    if (typeof product.cantidad === 'number') {
+      return product.cantidad; // Compatibilidad con datos antiguos
+    }
+    if (typeof product.cantidad === 'object' && product.cantidad !== null) {
+      return Object.values(product.cantidad).reduce((sum, q) => sum + (parseFloat(q) || 0), 0);
+    }
+    return 0;
+  };
+
+  // Obtener desglose de stock por talla
+  const getStockDetalle = (product) => {
+    if (typeof product.cantidad === 'number') {
+      return `S: ${product.cantidad}`;
+    }
+    if (typeof product.cantidad === 'object' && product.cantidad !== null) {
+      const tallas = ['S', 'M', 'L', 'XL', 'XXL'];
+      return tallas
+        .map(t => `${t}: ${parseFloat(product.cantidad[t]) || 0}`)
+        .filter(item => {
+          const cantidad = parseInt(item.split(': ')[1]);
+          return cantidad > 0;
+        })
+        .join(', ') || 'Sin stock';
+    }
+    return 'N/A';
+  };
+
+  // Obtener pilotos únicos
+  const getUniquePilotos = () => {
+    return [...new Set(products.map(p => p.piloto).filter(Boolean))];
+  };
+
+  // Calcular total invertido en inventario (precio compra * cantidad TOTAL comprada) por piloto
+  const getTotalInvertido = () => {
+    return products
+      .filter(p => {
+        if (ventasFilter) {
+          return p.piloto === ventasFilter;
+        }
+        return true; // Mostrar todos si no hay filtro
+      })
+      .reduce((sum, product) => {
+        const precioCompra = parseFloat(product.precioCompra) || 0;
+        const cantidadEnStock = getTotalQuantity(product);
+        
+        // Obtener cantidad vendida de este producto filtrado por piloto
+        const cantidadVendida = sales
+          .filter(s => s.productoId === product.id)
+          .reduce((total, sale) => {
+            // Si hay filtro de piloto, solo contar ventas de ese piloto
+            if (ventasFilter) {
+              return sale.piloto === ventasFilter ? total + (sale.cantidad || 0) : total;
+            }
+            return total + (sale.cantidad || 0);
+          }, 0);
+        
+        // Cantidad total comprada = stock actual + vendido
+        const cantidadTotalComprada = cantidadEnStock + cantidadVendida;
+        
+        return sum + (precioCompra * cantidadTotalComprada);
+      }, 0);
+  };
+
+  // Calcular cuánto se ha recuperado de la inversión (Total Ingresos)
+  const getRecuperacionInversion = () => {
+    return getFilteredSalesByPiloto().reduce((sum, s) => sum + (s.total || 0), 0);
   };
 
   const filteredProducts = getFilteredProducts();
   const uniqueBrands = [...new Set(products.map(p => p.marca).filter(Boolean))];
-  const inStockCount = filteredProducts.reduce((sum, p) => sum + (parseFloat(p.cantidad) || 1), 0);
-  const lowStockCount = filteredProducts.filter(p => (parseFloat(p.cantidad) || 1) < 5).length;
-  const totalValueFiltered = filteredProducts.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
+  const uniquePilotos = getUniquePilotos();
+  const inStockCount = filteredProducts.reduce((sum, p) => sum + getTotalQuantity(p), 0);
+  const lowStockCount = filteredProducts.filter(p => getTotalQuantity(p) < 5).length;
+  const totalValueFiltered = filteredProducts.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * getTotalQuantity(product), 0);
 
   const loadProducts = async () => {
     try {
@@ -246,20 +366,22 @@ export default function AdminPanel() {
       
       // Actualizar productos que no tengan cantidad (en paralelo, sin bloquear)
       const updatePromises = data.map(product => {
-        if (product.cantidad === undefined || product.cantidad === null || product.cantidad === '') {
-          product.cantidad = 1;
-          return updateDoc(doc(db, 'proyectoCascos', product.id), { cantidad: 1 });
+        // Inicializar orden si no existe
+        if (product.orden === undefined || product.orden === null) {
+          return updateDoc(doc(db, 'proyectoCascos', product.id), { orden: Math.max(...data.map(p => p.orden || 0), 0) + Math.random() });
         }
         return Promise.resolve();
       });
       
-      // No esperar a que se completen las actualizaciones, mostrar datos inmediatamente
-      Promise.all(updatePromises).catch(err => console.error('Error updating quantities:', err));
+      Promise.all(updatePromises).catch(err => console.error('Error updating products:', err));
       
       setProducts(data);
       
       // Calcular valor total
-      const total = data.reduce((sum, product) => sum + (parseFloat(product.precio) || 0) * (parseFloat(product.cantidad) || 1), 0);
+      const total = data.reduce((sum, product) => {
+        const qty = getTotalQuantity(product);
+        return sum + (parseFloat(product.precio) || 0) * qty;
+      }, 0);
       setTotalValue(total);
     } catch (error) {
       console.error('Error loading products:', error);
@@ -345,18 +467,41 @@ export default function AdminPanel() {
       let newTallas;
 
       if (index > -1) {
-        // Remover si ya existe
+        // Remover si ya existe - también remover su cantidad
         newTallas = currentTallas.filter((_, i) => i !== index);
+        // Remover cantidad de esa talla
+        const newCantidad = { ...prev.cantidad };
+        delete newCantidad[talla]; // O establecer a 0
+        newCantidad[talla] = 0;
+        
+        return {
+          ...prev,
+          talla: newTallas,
+          cantidad: newCantidad
+        };
       } else {
-        // Agregar si no existe
+        // Agregar si no existe - inicializar cantidad en 0
         newTallas = [...currentTallas, talla];
+        return {
+          ...prev,
+          talla: newTallas,
+          cantidad: {
+            ...prev.cantidad,
+            [talla]: 0
+          }
+        };
       }
-
-      return {
-        ...prev,
-        talla: newTallas
-      };
     });
+  };
+
+  const handleCantidadTallaChange = (talla, value) => {
+    setFormData(prev => ({
+      ...prev,
+      cantidad: {
+        ...prev.cantidad,
+        [talla]: parseFloat(value) || 0
+      }
+    }));
   };
 
   const handleImageSelect = (e) => {
@@ -482,19 +627,33 @@ export default function AdminPanel() {
         imageUrls = await uploadImagesToStorage(formData.imagenes);
       }
 
+      // Convertir cantidad a objeto con valores numéricos válidos
+      let cantidadFinal = { S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      if (typeof formData.cantidad === 'object' && formData.cantidad !== null) {
+        Object.keys(cantidadFinal).forEach(key => {
+          const val = formData.cantidad[key];
+          cantidadFinal[key] = parseFloat(val) || 0;
+        });
+      }
+
       const data = {
-        nombre: formData.nombre,
-        marca: formData.marca,
-        tipo: formData.tipo || '',
-        color: formData.color || '',
-        precio: parseFloat(formData.precio),
+        nombre: formData.nombre.trim(),
+        marca: formData.marca.trim(),
+        tipo: (formData.tipo || '').trim(),
+        color: (formData.color || '').trim(),
+        precio: parseFloat(formData.precio) || 0,
         precioCompra: parseFloat(formData.precioCompra) || 0,
-        cantidad: parseFloat(formData.cantidad) || 1,
-        descripcion: formData.descripcion || '',
-        talla: Array.isArray(formData.talla) ? formData.talla : [], // Guardar como array
-        piloto: formData.piloto || '', // Christian o Saturno
-        certificados: formData.certificados || [],
+        cantidad: cantidadFinal, // Guardar objeto con cantidades por talla validadas
+        descripcion: (formData.descripcion || '').trim(),
+        talla: Array.isArray(formData.talla) ? formData.talla : [],
+        piloto: formData.piloto || '',
+        certificados: formData.certificados || []
       };
+
+      // Solo agregar orden si es creación (no edición)
+      if (!editingId) {
+        data.orden = Math.max(...products.map(p => p.orden || 0), 0) + 1;
+      }
 
       if (editingId) {
         // Modo de edición
@@ -531,41 +690,69 @@ export default function AdminPanel() {
         precio: '',
         precioCompra: '',
         descripcion: '',
-        talla: [], // Array vacío para tallas
-        cantidad: '',
+        talla: [],
+        piloto: '',
+        cantidad: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
         certificados: [],
         imagen: null,
-        imagenes: []
+        imagenes: [],
+        orden: 0
       });
       setImagePreviews([]);
       setEditingId(null);
     } catch (error) {
       console.error('Error adding/updating product:', error);
-      setToast({ type: 'error', message: '❌ Error al procesar el casco' });
+      setToast({ type: 'error', message: `❌ Error al procesar el casco: ${error.message}` });
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleEdit = async (product) => {
+    // Convertir cantidad antigua (número) a nueva estructura si es necesario
+    let cantidad = product.cantidad;
+    let talla = Array.isArray(product.talla) ? product.talla : (product.talla ? [product.talla] : []);
+    
+    if (typeof cantidad === 'number') {
+      cantidad = { S: cantidad, M: 0, L: 0, XL: 0, XXL: 0 };
+      // Si es dato antiguo y no tiene talla especificada, asignar 'S'
+      if (talla.length === 0 && cantidad.S > 0) {
+        talla = ['S'];
+      }
+    } else if (typeof cantidad === 'object' && cantidad !== null) {
+      cantidad = { S: 0, M: 0, L: 0, XL: 0, XXL: 0, ...cantidad };
+      // Si no hay talla pero hay cantidades, auto-detectar las tallas con valores
+      if (talla.length === 0) {
+        talla = Object.keys(cantidad).filter(t => cantidad[t] > 0);
+        if (talla.length === 0) {
+          talla = ['S']; // Mostrar al menos S para que pueda editar
+        }
+      }
+    } else {
+      cantidad = { S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      if (talla.length === 0) {
+        talla = ['S'];
+      }
+    }
+
     setFormData({
-      nombre: product.nombre,
-      marca: product.marca,
+      nombre: product.nombre || '',
+      marca: product.marca || '',
       tipo: product.tipo || '',
       color: product.color || '',
-      precio: product.precio,
-      precioCompra: product.precioCompra || '',
-      cantidad: product.cantidad || 1,
+      precio: String(product.precio || 0),
+      precioCompra: String(product.precioCompra || 0),
+      cantidad: cantidad,
       descripcion: product.descripcion || '',
-      talla: Array.isArray(product.talla) ? product.talla : (product.talla ? [product.talla] : []),
-      piloto: product.piloto || '', // Cargar piloto
+      talla: talla,
+      piloto: product.piloto || '',
       certificados: product.certificados || [],
       imagen: null,
-      imagenes: []
+      imagenes: [],
+      orden: product.orden || 0
     });
     setImagePreviews([]);
     setEditingId(product.id);
-    // Scroll al formulario
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -578,12 +765,13 @@ export default function AdminPanel() {
       precio: '',
       precioCompra: '',
       descripcion: '',
-      talla: [], // Array vacío
-      piloto: '', // Resetear piloto
-      cantidad: '',
+      talla: [],
+      piloto: '',
+      cantidad: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
       certificados: [],
       imagen: null,
-      imagenes: []
+      imagenes: [],
+      orden: 0
     });
     setImagePreviews([]);
     setEditingId(null);
@@ -701,20 +889,35 @@ export default function AdminPanel() {
       }
 
       // Preparar datos para Excel
-      const excelData = filteredProducts.map(product => ({
-        'Nombre': product.nombre || 'N/A',
-        'Marca': product.marca || 'N/A',
-        'Tipo': product.tipo || '-',
-        'Color': product.color || '-',
-        'Talla': Array.isArray(product.talla) ? product.talla.join(', ') || '-' : product.talla || '-',
-        'Piloto': product.piloto || '-',
-        'Certificados': (product.certificados || []).join(', ') || '-',
-        'Cantidad': product.cantidad || 0,
-        'Precio Unitario': product.precio || 0,
-        'Precio Compra': product.precioCompra || 0,
-        'Stock Total (S/)': (product.precio || 0) * (product.cantidad || 0),
-        'Descripción': product.descripcion || '-'
-      }));
+      const excelData = filteredProducts.map(product => {
+        let cantidadPorTalla = '-';
+        let cantidadTotal = getTotalQuantity(product);
+        
+        if (typeof product.cantidad === 'object' && product.cantidad !== null) {
+          const tallasConCantidad = Object.entries(product.cantidad)
+            .filter(([_, qty]) => parseFloat(qty) > 0)
+            .map(([talla, qty]) => `${talla}: ${parseInt(qty)}`)
+            .join(', ');
+          cantidadPorTalla = tallasConCantidad || '-';
+        }
+
+        return {
+          'Nombre': product.nombre || 'N/A',
+          'Marca': product.marca || 'N/A',
+          'Tipo': product.tipo || '-',
+          'Color': product.color || '-',
+          'Talla Disponibles': Array.isArray(product.talla) ? product.talla.join(', ') || '-' : product.talla || '-',
+          'Cantidad por Talla': cantidadPorTalla,
+          'Cantidad Total': cantidadTotal,
+          'Piloto': product.piloto || '-',
+          'Certificados': (product.certificados || []).join(', ') || '-',
+          'Precio Unitario': product.precio || 0,
+          'Precio Compra': product.precioCompra || 0,
+          'Stock Total (S/)': (product.precio || 0) * cantidadTotal,
+          'Orden': product.orden || 0,
+          'Descripción': product.descripcion || '-'
+        };
+      });
 
       // Crear worksheet
       const ws = XLSX.utils.json_to_sheet(excelData);
@@ -725,13 +928,15 @@ export default function AdminPanel() {
         { wch: 15 },  // Marca
         { wch: 15 },  // Tipo
         { wch: 12 },  // Color
-        { wch: 10 },  // Talla
+        { wch: 20 },  // Talla Disponibles
+        { wch: 25 },  // Cantidad por Talla
+        { wch: 12 },  // Cantidad Total
         { wch: 12 },  // Piloto
         { wch: 20 },  // Certificados
-        { wch: 12 },  // Cantidad
         { wch: 15 },  // Precio Unitario
         { wch: 12 },  // Precio Compra
         { wch: 15 },  // Stock Total
+        { wch: 8 },   // Orden
         { wch: 30 }   // Descripción
       ];
       ws['!cols'] = columnWidths;
@@ -753,9 +958,182 @@ export default function AdminPanel() {
     }
   };
 
+  const handleExportInversionDetailToExcel = () => {
+    try {
+      // Filtrar productos: si hay filtro de piloto, solo los del piloto; si no, todos
+      const productsToExport = pilotoFilter 
+        ? products.filter(p => p.piloto === pilotoFilter)
+        : products;
+
+      if (productsToExport.length === 0) {
+        setToast({ type: 'error', message: 'No hay productos para exportar' });
+        return;
+      }
+
+      // Preparar datos para Excel
+      const excelData = productsToExport.map(product => {
+        const precioCompra = parseFloat(product.precioCompra) || 0;
+        const precioVenta = parseFloat(product.precio) || 0;
+        const cantidadEnStock = getTotalQuantity(product);
+        
+        // Cantidad vendida
+        const cantidadVendida = sales
+          .filter(s => s.productoId === product.id)
+          .reduce((total, sale) => total + (sale.cantidad || 0), 0);
+        
+        // Cantidad total comprada
+        const cantidadTotalComprada = cantidadEnStock + cantidadVendida;
+        
+        // Cálculos
+        const costoTotal = precioCompra * cantidadTotalComprada;
+        const ingresosTotal = precioVenta * cantidadVendida;
+        const gananciaTotal = ingresosTotal - (precioCompra * cantidadVendida);
+        const margenGanancia = cantidadVendida > 0 ? (gananciaTotal / ingresosTotal) * 100 : 0;
+        
+        let cantidadPorTalla = '-';
+        if (typeof product.cantidad === 'object' && product.cantidad !== null) {
+          const tallasConCantidad = Object.entries(product.cantidad)
+            .filter(([_, qty]) => parseFloat(qty) > 0)
+            .map(([talla, qty]) => `${talla}: ${parseInt(qty)}`)
+            .join(', ');
+          cantidadPorTalla = tallasConCantidad || '-';
+        }
+
+        return {
+          'Nombre': product.nombre || 'N/A',
+          'Marca': product.marca || 'N/A',
+          'Color': product.color || '-',
+          'Talla Disponibles': Array.isArray(product.talla) ? product.talla.join(', ') || '-' : product.talla || '-',
+          'Stock por Talla': cantidadPorTalla,
+          'Stock Actual': cantidadEnStock,
+          'Cantidad Vendida': cantidadVendida,
+          'Cantidad Total Comprada': cantidadTotalComprada,
+          'Piloto': product.piloto || '-',
+          'Precio Compra': precioCompra, // Como número, no string
+          'Precio Venta': precioVenta, // Como número
+          'Costo Total Invertido': costoTotal, // Como número
+          'Ingresos por Ventas': ingresosTotal, // Como número
+          'Ganancia Total': gananciaTotal, // Como número
+          'Margen Ganancia %': Math.round(margenGanancia * 100) / 100 // Como número con 2 decimales
+        };
+      });
+
+      // Crear worksheet
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Ajustar ancho de columnas
+      const columnWidths = [
+        { wch: 25 },  // Nombre
+        { wch: 15 },  // Marca
+        { wch: 12 },  // Color
+        { wch: 20 },  // Talla Disponibles
+        { wch: 25 },  // Stock por Talla
+        { wch: 12 },  // Stock Actual
+        { wch: 15 },  // Cantidad Vendida
+        { wch: 18 },  // Cantidad Total Comprada
+        { wch: 12 },  // Piloto
+        { wch: 14 },  // Precio Compra
+        { wch: 12 },  // Precio Venta
+        { wch: 18 },  // Costo Total Invertido
+        { wch: 18 },  // Ingresos por Ventas
+        { wch: 15 },  // Ganancia Total
+        { wch: 15 }   // Margen Ganancia %
+      ];
+      ws['!cols'] = columnWidths;
+
+      // Dar formato numérico a las columnas de dinero
+      const moneyColumns = ['J', 'K', 'L', 'M', 'N', 'O']; // Precio Compra, Precio Venta, etc.
+      Object.keys(ws).forEach(cell => {
+        const col = cell.replace(/\d+/g, '');
+        const row = parseInt(cell.replace(/\D/g, ''));
+        if (moneyColumns.includes(col) && row > 1) {
+          ws[cell].z = '#,##0.00'; // Formato de moneda
+        }
+      });
+
+      // Crear workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Inversión Detalle');
+
+      // Crear nombre de archivo con fecha
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = pilotoFilter 
+        ? `inracing_inversion_${pilotoFilter}_${dateStr}.xlsx`
+        : `inracing_inversion_detalle_${dateStr}.xlsx`;
+
+      // Descargar archivo
+      XLSX.writeFile(wb, filename);
+      const count = productsToExport.length;
+      setToast({ type: 'success', message: `✅ Exportados ${count} producto${count !== 1 ? 's' : ''} a Excel` });
+    } catch (error) {
+      console.error('Error exporting inversion detail to Excel:', error);
+      setToast({ type: 'error', message: '❌ Error al exportar detalle de inversión a Excel' });
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('adminUser');
     router.push('/login');
+  };
+
+  const handleProductDragStart = (e, productId) => {
+    setDraggedProductId(productId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleProductDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleProductDrop = async (e, targetProductId) => {
+    e.preventDefault();
+    
+    if (!draggedProductId || draggedProductId === targetProductId) {
+      setDraggedProductId(null);
+      return;
+    }
+
+    try {
+      // Obtener la lista filtrada y ordenada
+      const sortedProducts = [...getFilteredProducts()].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+      const draggedIndex = sortedProducts.findIndex(p => p.id === draggedProductId);
+      const targetIndex = sortedProducts.findIndex(p => p.id === targetProductId);
+      
+      if (draggedIndex === -1 || targetIndex === -1) {
+        setDraggedProductId(null);
+        return;
+      }
+
+      // Crear nueva lista reordenada
+      const reordered = [...sortedProducts];
+      const [draggedProduct] = reordered.splice(draggedIndex, 1);
+      reordered.splice(targetIndex, 0, draggedProduct);
+
+      // Actualizar órdenes en Firebase
+      const updatePromises = reordered.map((product, index) => {
+        return updateDoc(doc(db, 'proyectoCascos', product.id), { orden: index });
+      });
+
+      await Promise.all(updatePromises);
+
+      // Actualizar estado local inmediatamente
+      setProducts(prev => prev.map(p => {
+        const reorderedProduct = reordered.find(r => r.id === p.id);
+        if (reorderedProduct) {
+          const newOrder = reordered.indexOf(reorderedProduct);
+          return { ...p, orden: newOrder };
+        }
+        return p;
+      }));
+
+      setToast({ type: 'success', message: '✅ Orden actualizado' });
+    } catch (error) {
+      console.error('Error updating product order:', error);
+      setToast({ type: 'error', message: '❌ Error al reordenar' });
+    } finally {
+      setDraggedProductId(null);
+    }
   };
 
   const handleSaleSubmit = async (e) => {
@@ -775,35 +1153,128 @@ export default function AdminPanel() {
         return;
       }
 
+      // Validar que el producto tenga piloto asignado
+      if (!selectedProduct.piloto || selectedProduct.piloto === '') {
+        setToast({ type: 'error', message: 'Asigne en inventario un piloto al producto para poder registrar la venta' });
+        setSubmitting(false);
+        return;
+      }
+
+      // NUEVA VALIDACIÓN: Verificar que se haya seleccionado una talla
+      if (!saleData.talla || saleData.talla === '') {
+        setToast({ type: 'error', message: '⚠️ Debes seleccionar una talla para registrar la venta' });
+        setSubmitting(false);
+        return;
+      }
+
+      // NUEVA VALIDACIÓN: Verificar que la talla tenga stock disponible
+      let stockDisponible = 0;
+      if (typeof selectedProduct.cantidad === 'object' && selectedProduct.cantidad !== null) {
+        stockDisponible = parseFloat(selectedProduct.cantidad[saleData.talla]) || 0;
+      } else if (typeof selectedProduct.cantidad === 'number') {
+        stockDisponible = selectedProduct.cantidad;
+      }
+
+      if (stockDisponible <= 0) {
+        setToast({ type: 'error', message: `❌ No hay stock disponible en talla ${saleData.talla}` });
+        setSubmitting(false);
+        return;
+      }
+
       const cantidad = parseFloat(saleData.cantidad);
+      
+      // NUEVA VALIDACIÓN: Verificar que la cantidad no exceda el stock disponible
+      if (cantidad > stockDisponible) {
+        setToast({ type: 'error', message: `❌ Solo hay ${stockDisponible} unidades disponibles en talla ${saleData.talla}` });
+        setSubmitting(false);
+        return;
+      }
+
       const precioUnitario = parseFloat(saleData.precioUnitario) || selectedProduct.precio;
       const total = cantidad * precioUnitario;
 
-      // Registrar la venta
-      const venta = {
-        productoId: saleData.productoId,
-        productoNombre: selectedProduct.nombre,
-        marca: selectedProduct.marca,
-        cantidad: cantidad,
-        talla: saleData.talla || selectedProduct.talla,
-        precioUnitario: precioUnitario,
-        total: total,
-        createdAt: Date.now(),
-        fecha: new Date().toLocaleString('es-PE')
-      };
+      if (editingSaleId) {
+        // Editar venta existente
+        const oldSale = sales.find(s => s.id === editingSaleId);
+        if (!oldSale) {
+          setToast({ type: 'error', message: 'Venta no encontrada' });
+          setSubmitting(false);
+          return;
+        }
 
-      const newSaleDoc = await addDoc(collection(db, 'ventas'), venta);
-      
-      // El listener onSnapshot ya actualizará automáticamente setSales
-      // No duplicar con setSales() manual aquí
+        // Restaurar stock del producto anterior
+        const oldProduct = products.find(p => p.id === oldSale.productoId);
+        if (oldProduct) {
+          let restoredCantidad = oldProduct.cantidad;
+          if (typeof restoredCantidad === 'object' && restoredCantidad !== null) {
+            restoredCantidad = { ...restoredCantidad };
+            if (oldSale.talla && restoredCantidad.hasOwnProperty(oldSale.talla)) {
+              restoredCantidad[oldSale.talla] = (parseFloat(restoredCantidad[oldSale.talla]) || 0) + (oldSale.cantidad || 0);
+            }
+          } else {
+            restoredCantidad = (parseFloat(restoredCantidad) || 0) + (oldSale.cantidad || 0);
+          }
+          await updateDoc(doc(db, 'proyectoCascos', oldSale.productoId), { cantidad: restoredCantidad });
+        }
 
-      // Actualizar stock del producto
-      const newCantidad = (parseFloat(selectedProduct.cantidad) || 1) - cantidad;
+        // Asignar piloto automáticamente si la venta no tiene piloto
+        let pilotoAsignar = oldSale.piloto || selectedProduct.piloto || '';
+
+        // Actualizar venta
+        await updateDoc(doc(db, 'ventas', editingSaleId), {
+          productoId: saleData.productoId,
+          productoNombre: selectedProduct.nombre,
+          marca: selectedProduct.marca,
+          piloto: pilotoAsignar,
+          cantidad: cantidad,
+          talla: saleData.talla || (typeof selectedProduct.talla === 'string' ? selectedProduct.talla : selectedProduct.talla?.[0] || ''),
+          precioUnitario: precioUnitario,
+          total: total,
+          fecha: new Date().toLocaleString('es-PE')
+        });
+
+        setToast({ type: 'success', message: '✅ Venta actualizada exitosamente' });
+      } else {
+        // Registrar nueva venta
+        const venta = {
+          productoId: saleData.productoId,
+          productoNombre: selectedProduct.nombre,
+          marca: selectedProduct.marca,
+          piloto: selectedProduct.piloto || '',
+          cantidad: cantidad,
+          talla: saleData.talla || (typeof selectedProduct.talla === 'string' ? selectedProduct.talla : selectedProduct.talla?.[0] || ''),
+          precioUnitario: precioUnitario,
+          total: total,
+          createdAt: Date.now(),
+          fecha: new Date().toLocaleString('es-PE')
+        };
+
+        await addDoc(collection(db, 'ventas'), venta);
+        setToast({ type: 'success', message: '✅ Venta registrada exitosamente' });
+      }
+
+      // Actualizar stock del producto nuevo (si es nueva venta o cambió el producto)
+      const nuevaCantidad = { ...selectedProduct.cantidad };
+      if (saleData.talla && nuevaCantidad.hasOwnProperty(saleData.talla)) {
+        nuevaCantidad[saleData.talla] = (parseFloat(nuevaCantidad[saleData.talla]) || 0) - cantidad;
+      } else {
+        const tallasDisponibles = Object.keys(nuevaCantidad).filter(t => parseFloat(nuevaCantidad[t]) > 0);
+        if (tallasDisponibles.length > 0) {
+          nuevaCantidad[tallasDisponibles[0]] = (parseFloat(nuevaCantidad[tallasDisponibles[0]]) || 0) - cantidad;
+        }
+      }
+
       await updateDoc(doc(db, 'proyectoCascos', saleData.productoId), {
-        cantidad: newCantidad
+        cantidad: nuevaCantidad
       });
-      
-      // El listener onSnapshot actualizará automáticamente setProducts con el nuevo stock
+
+      // Actualizar el estado local inmediatamente para refrescar el inventario
+      setProducts(prev => prev.map(p => 
+        p.id === saleData.productoId ? { ...p, cantidad: nuevaCantidad } : p
+      ));
+
+      // Recalcular total value
+      setTotalValue(prev => prev - (parseFloat(selectedProduct.precio) || 0) * cantidad);
 
       // Limpiar formulario
       setSaleData({
@@ -812,17 +1283,16 @@ export default function AdminPanel() {
         talla: '',
         precioUnitario: ''
       });
-
-      setToast({ type: 'success', message: '✅ Venta registrada exitosamente' });
+      setEditingSaleId(null);
     } catch (error) {
-      console.error('Error registering sale:', error);
-      setToast({ type: 'error', message: '❌ Error al registrar la venta' });
+      console.error('Error registering/updating sale:', error);
+      setToast({ type: 'error', message: '❌ Error al procesar la venta' });
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDeleteSale = async (saleId, productId, cantidad) => {
+  const handleDeleteSale = async (saleId, productId, cantidad, talla) => {
     if (!confirm('¿Estás seguro de que deseas eliminar esta venta? El stock se revertirá.')) return;
 
     try {
@@ -832,18 +1302,63 @@ export default function AdminPanel() {
       // Restaurar stock del producto
       const product = products.find(p => p.id === productId);
       if (product) {
-        const newCantidad = (parseFloat(product.cantidad) || 0) + parseFloat(cantidad);
+        let newCantidad = product.cantidad;
+        
+        // Si es objeto (nueva estructura), actualizar talla específica
+        if (typeof newCantidad === 'object' && newCantidad !== null) {
+          newCantidad = { ...newCantidad };
+          if (talla && newCantidad.hasOwnProperty(talla)) {
+            newCantidad[talla] = (parseFloat(newCantidad[talla]) || 0) + parseFloat(cantidad);
+          }
+        } else {
+          // Compatibilidad con datos antiguos
+          newCantidad = (parseFloat(newCantidad) || 0) + parseFloat(cantidad);
+        }
+        
         await updateDoc(doc(db, 'proyectoCascos', productId), {
           cantidad: newCantidad
         });
+
+        // Actualizar estado local inmediatamente para refrescar el inventario
+        setProducts(prev => prev.map(p => 
+          p.id === productId ? { ...p, cantidad: newCantidad } : p
+        ));
+
+        // Recalcular total value
+        setTotalValue(prev => {
+          const qty = typeof newCantidad === 'object' 
+            ? Object.values(newCantidad).reduce((sum, q) => sum + (parseFloat(q) || 0), 0)
+            : parseFloat(newCantidad) || 0;
+          return prev - (parseFloat(product.precio) || 0) * parseFloat(cantidad);
+        });
       }
 
-      // Los listeners onSnapshot actualizarán automáticamente los datos
       setToast({ type: 'success', message: '✅ Venta eliminada y stock restaurado' });
     } catch (error) {
       console.error('Error deleting sale:', error);
       setToast({ type: 'error', message: '❌ Error al eliminar la venta' });
     }
+  };
+
+  const handleEditSale = (sale) => {
+    setSaleData({
+      productoId: sale.productoId,
+      cantidad: sale.cantidad.toString(),
+      talla: sale.talla || '',
+      precioUnitario: sale.precioUnitario.toString()
+    });
+    setEditingSaleId(sale.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEditSale = () => {
+    setSaleData({
+      productoId: '',
+      cantidad: '',
+      talla: '',
+      precioUnitario: ''
+    });
+    setEditingSaleId(null);
   };
 
   if (!adminUser) {
@@ -995,17 +1510,6 @@ export default function AdminPanel() {
                 />
                 <input
                   type="number"
-                  name="cantidad"
-                  placeholder="Cantidad disponible"
-                  value={formData.cantidad}
-                  onChange={handleInputChange}
-                  className={styles.input}
-                />
-              </div>
-
-              <div className={styles.formGrid}>
-                <input
-                  type="number"
                   step="0.01"
                   name="precioCompra"
                   placeholder="Precio de Compra (S/)"
@@ -1083,6 +1587,37 @@ export default function AdminPanel() {
                   <div style={{marginTop: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)'}}>
                     Seleccionadas: {formData.talla?.length || 0} tallas
                   </div>
+
+                  {/* Inputs de cantidad por talla */}
+                  {formData.talla && formData.talla.length > 0 && (
+                    <div style={{marginTop: '20px', paddingTop: '20px', borderTop: '2px solid rgba(255, 145, 89, 0.2)', gridColumn: '1 / -1'}}>
+                      <div style={{fontSize: '0.95rem', fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)'}}>
+                        📦 Cantidad por Talla
+                      </div>
+                      <div className={styles.cantidadTallaGrid}>
+                        {formData.talla.map(talla => (
+                          <div key={talla} style={{display: 'flex', flexDirection: 'column'}}>
+                            <label style={{fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: '500'}}>
+                              {talla}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.cantidad[talla] || 0}
+                              onChange={(e) => handleCantidadTallaChange(talla, e.target.value)}
+                              className={styles.input}
+                              style={{padding: '8px'}}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop: '12px', padding: '10px', backgroundColor: 'rgba(76, 175, 80, 0.1)', borderRadius: '6px', borderLeft: '3px solid #4caf50', gridColumn: '1 / -1'}}>
+                        <span style={{fontSize: '0.9rem', color: '#4caf50', fontWeight: '600'}}>
+                          Total: {formData.talla.reduce((sum, t) => sum + (parseFloat(formData.cantidad[t]) || 0), 0)} unidades
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1234,7 +1769,7 @@ export default function AdminPanel() {
         <div className={styles.listSection}>
           <div className={styles.listHeader}>
             <h2 className={styles.listTitle}>Inventario ({filteredProducts.length})</h2>
-            <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+            <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
               <select
                 value={brandFilter}
                 onChange={(e) => setBrandFilter(e.target.value)}
@@ -1245,12 +1780,29 @@ export default function AdminPanel() {
                   <option key={brand} value={brand}>{brand}</option>
                 ))}
               </select>
+              <select
+                value={pilotoFilter}
+                onChange={(e) => setPilotoFilter(e.target.value)}
+                className={styles.brandFilter}
+              >
+                <option value="">Todos los pilotos</option>
+                {uniquePilotos.map(piloto => (
+                  <option key={piloto} value={piloto}>{piloto}</option>
+                ))}
+              </select>
               <button 
                 onClick={handleExportInventoryToExcel}
                 className={styles.exportBtn}
                 title="Exportar inventario a Excel"
               >
                 📊 Exportar Inventario
+              </button>
+              <button 
+                onClick={handleExportInversionDetailToExcel}
+                className={styles.exportBtn}
+                title="Exportar detalle de inversión con seguimiento"
+              >
+                💰 Exportar Inversión Detalle
               </button>
               {selectedProducts.size > 0 && (
                 <button 
@@ -1288,18 +1840,30 @@ export default function AdminPanel() {
                       title="Seleccionar todos"
                     />
                   </th>
+                  <th style={{width: '50px', textAlign: 'center'}}>ORDEN</th>
                   <th>IMAGEN</th>
                   <th>NOMBRE</th>
                   <th>MARCA</th>
                   <th>PRECIO</th>
                   <th>PILOTO</th>
+                  <th>STOCK DETALLE</th>
                   <th>STOCK</th>
                   <th>ACCIONES</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map(product => (
-                  <tr key={product.id}>
+                {[...filteredProducts].sort((a, b) => (a.orden || 0) - (b.orden || 0)).map(product => (
+                  <tr 
+                    key={product.id}
+                    draggable
+                    onDragStart={(e) => handleProductDragStart(e, product.id)}
+                    onDragOver={handleProductDragOver}
+                    onDrop={(e) => handleProductDrop(e, product.id)}
+                    style={{
+                      opacity: draggedProductId === product.id ? 0.5 : 1,
+                      cursor: 'move'
+                    }}
+                  >
                     <td style={{textAlign: 'center', width: '40px'}}>
                       <input
                         type="checkbox"
@@ -1316,6 +1880,10 @@ export default function AdminPanel() {
                         style={{cursor: 'pointer', width: '18px', height: '18px'}}
                       />
                     </td>
+                    <td style={{textAlign: 'center', fontSize: '0.9rem', fontWeight: '600', color: '#ff9159'}}>
+                      <div style={{cursor: 'grab'}}>⋮⋮</div>
+                      <div style={{fontSize: '0.8rem'}}>#{product.orden || 0}</div>
+                    </td>
                     <td>
                       {product.imagen && (
                         <img src={product.imagen} alt={product.nombre} className={styles.tableImg} />
@@ -1330,9 +1898,14 @@ export default function AdminPanel() {
                     <td style={{fontWeight: '500', color: '#ff9159'}}>
                       {product.piloto || '-'}
                     </td>
+                    <td style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>
+                      <div style={{padding: '6px 10px', backgroundColor: 'rgba(255, 145, 89, 0.1)', borderRadius: '4px', fontWeight: '500'}}>
+                        {getStockDetalle(product)}
+                      </div>
+                    </td>
                     <td>
-                      <span className={`${styles.stockBadge} ${parseFloat(product.cantidad) < 5 ? styles.stockBadgeLow : ''}`}>
-                        {parseFloat(product.cantidad) >= 5 ? 'En Stock' : 'Bajo Stock'} ({product.cantidad >= 0 ? product.cantidad : 0})
+                      <span className={`${styles.stockBadge} ${getTotalQuantity(product) < 5 ? styles.stockBadgeLow : ''}`}>
+                        {getTotalQuantity(product) >= 5 ? 'En Stock' : 'Bajo Stock'} ({getTotalQuantity(product)})
                       </span>
                     </td>
                     <td className={styles.actionsCell}>
@@ -1368,7 +1941,7 @@ export default function AdminPanel() {
         <div className={styles.salesSection}>
           {/* FORMULARIO DE VENTA RÁPIDA */}
           <div className={styles.formCard}>
-            <h3 className={styles.formTitle}>⚡ Registro Rápido de Venta</h3>
+            <h3 className={styles.formTitle}>{editingSaleId ? '✏️ Editar Venta' : '⚡ Registro Rápido de Venta'}</h3>
             <form onSubmit={handleSaleSubmit} className={styles.form}>
               <div className={styles.formGrid}>
                 <select
@@ -1386,7 +1959,7 @@ export default function AdminPanel() {
                   <option value="">Seleccionar Producto</option>
                   {products.map(product => (
                     <option key={product.id} value={product.id}>
-                      {product.nombre} - {product.marca} (Stock: {product.cantidad || 0})
+                      {product.nombre} - {product.marca} (Stock: {getTotalQuantity(product)})
                     </option>
                   ))}
                 </select>
@@ -1433,30 +2006,41 @@ export default function AdminPanel() {
 
               <div className={styles.formActions}>
                 <button type="submit" className={styles.submitBtn} disabled={submitting}>
-                  {submitting ? '⏳ Procesando...' : '💳 Registrar Venta'}
+                  {submitting ? '⏳ Procesando...' : editingSaleId ? '✏️ Actualizar Venta' : '💳 Registrar Venta'}
                 </button>
+                {editingSaleId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditSale}
+                    className={styles.cancelBtn}
+                  >
+                    Cancelar Edición
+                  </button>
+                )}
               </div>
             </form>
+            
+
           </div>
 
           {/* RESUMEN DE VENTAS */}
           <div className={styles.salesSummary}>
-            <h3 className={styles.summaryTitle}>Resumen de Ventas</h3>
+            <h3 className={styles.summaryTitle}>Resumen de Ventas {ventasFilter ? `(${ventasFilter})` : ''}</h3>
             <div className={styles.summaryStats}>
               <div className={styles.statItem}>
                 <span className={styles.statLabel}>Total de Ventas</span>
-                <span className={styles.statValue}>{sales.length}</span>
+                <span className={styles.statValue}>{getFilteredSalesByPiloto().length}</span>
               </div>
               <div className={styles.statItem}>
                 <span className={styles.statLabel}>Ingresos Totales</span>
                 <span className={styles.statValue}>
-                  S/ {sales.reduce((sum, s) => sum + (s.total || 0), 0).toFixed(2)}
+                  S/ {getFilteredSalesByPiloto().reduce((sum, s) => sum + (s.total || 0), 0).toFixed(2)}
                 </span>
               </div>
               <div className={styles.statItem}>
                 <span className={styles.statLabel}>Hoy</span>
                 <span className={styles.statValue}>
-                  {sales.filter(s => {
+                  {getFilteredSalesByPiloto().filter(s => {
                     const today = new Date().toDateString();
                     const saleDate = new Date(s.createdAt).toDateString();
                     return today === saleDate;
@@ -1472,39 +2056,65 @@ export default function AdminPanel() {
         <div className={styles.analyticsSection}>
           <h2 className={styles.listTitle}>📊 Analytics - Análisis de Ventas</h2>
           
+          {/* FILTRO DE PILOTO */}
+          <div style={{marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center'}}>
+            <select
+              value={ventasFilter}
+              onChange={(e) => setVentasFilter(e.target.value)}
+              className={styles.brandFilter}
+            >
+              <option value="">Todas las ventas (General)</option>
+              {getUniquePilotos().map(piloto => (
+                <option key={piloto} value={piloto}>{piloto}</option>
+              ))}
+            </select>
+            <span style={{fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '500'}}>
+              {ventasFilter ? `Mostrando: ${ventasFilter}` : 'Mostrando: Todas'}
+            </span>
+          </div>
+          
           {/* METRICS */}
           <div className={styles.metricsGrid}>
             <div className={styles.metricCard}>
+              <span className={styles.metricLabel}>Total Invertido {ventasFilter ? `(${ventasFilter})` : ''}</span>
+              <span className={styles.metricValue}>
+                S/ {getTotalInvertido().toFixed(2)}
+              </span>
+            </div>
+            <div className={styles.metricCard}>
               <span className={styles.metricLabel}>Total Ingresos</span>
               <span className={styles.metricValue}>
-                S/ {sales.reduce((sum, s) => sum + (s.total || 0), 0).toFixed(2)}
+                S/ {getFilteredSalesByPiloto().reduce((sum, s) => sum + (s.total || 0), 0).toFixed(2)}
+              </span>
+            </div>
+            <div className={styles.metricCard}>
+              <span className={styles.metricLabel}>Recuperación de Inversión</span>
+              <span className={styles.metricValue} style={{color: getRecuperacionInversion() >= getTotalInvertido() ? '#4caf50' : '#ff9159'}}>
+                {((getRecuperacionInversion() / getTotalInvertido()) * 100).toFixed(1)}%
               </span>
             </div>
             <div className={styles.metricCard}>
               <span className={styles.metricLabel}>Total Ventas</span>
-              <span className={styles.metricValue}>{sales.length}</span>
+              <span className={styles.metricValue}>{getFilteredSalesByPiloto().length}</span>
             </div>
             <div className={styles.metricCard}>
               <span className={styles.metricLabel}>Promedio por Venta</span>
               <span className={styles.metricValue}>
-                S/ {sales.length > 0 ? (sales.reduce((sum, s) => sum + (s.total || 0), 0) / sales.length).toFixed(2) : '0.00'}
+                S/ {getFilteredSalesByPiloto().length > 0 ? (getFilteredSalesByPiloto().reduce((sum, s) => sum + (s.total || 0), 0) / getFilteredSalesByPiloto().length).toFixed(2) : '0.00'}
               </span>
             </div>
             <div className={styles.metricCard}>
               <span className={styles.metricLabel}>Unidades Vendidas</span>
               <span className={styles.metricValue}>
-                {sales.reduce((sum, s) => sum + (s.cantidad || 0), 0)}
+                {getFilteredSalesByPiloto().reduce((sum, s) => sum + (s.cantidad || 0), 0)}
               </span>
             </div>
             <div className={styles.metricCard}>
-              <span className={styles.metricLabel}>Ganancia Total</span>
+              <span className={styles.metricLabel}>Ganancia Total {ventasFilter ? `(${ventasFilter})` : ''}</span>
               <span className={styles.metricValue}>
                 S/ {(() => {
-                  const totalGanancia = sales.reduce((sum, sale) => {
-                    const product = products.find(p => p.id === sale.productoId);
-                    const precioCompra = product?.precioCompra || 0;
-                    const ganancia = ((sale.precioUnitario || 0) - precioCompra) * (sale.cantidad || 1);
-                    return sum + ganancia;
+                  const totalGanancia = getFilteredSalesByPiloto().reduce((sum, sale) => {
+                    return sum + getGananciaWithDiscount(sale);
                   }, 0);
                   return totalGanancia.toFixed(2);
                 })()}
@@ -1521,7 +2131,7 @@ export default function AdminPanel() {
                 const monthlyData = {};
                 const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
                 
-                sales.forEach(sale => {
+                getFilteredSalesByPiloto().forEach(sale => {
                   const date = new Date(sale.createdAt);
                   const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
                   if (!monthlyData[monthKey]) {
@@ -1600,7 +2210,7 @@ export default function AdminPanel() {
           </div>
           {sales.length === 0 ? (
             <p style={{padding: '20px', textAlign: 'center'}}>No hay ventas registradas</p>
-          ) : getFilteredSales().length === 0 ? (
+          ) : getFilteredSalesByPiloto().length === 0 ? (
             <p style={{padding: '20px', textAlign: 'center'}}>No hay ventas en este período</p>
           ) : (
             <div className={styles.tableResponsive}>
@@ -1610,28 +2220,49 @@ export default function AdminPanel() {
                     <th>FECHA</th>
                     <th>PRODUCTO</th>
                     <th>MARCA</th>
+                    <th>PILOTO</th>
                     <th>CANTIDAD</th>
                     <th>TALLA</th>
+                    <th>PRECIO COMPRA</th>
                     <th>PRECIO UNIT.</th>
                     <th>TOTAL</th>
+                    <th>GANANCIA {ventasFilter ? `(${ventasFilter})` : ''}</th>
                     <th>ACCIONES</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {getFilteredSales().map(sale => (
+                  {getFilteredSalesByPiloto().map(sale => (
                     <tr key={sale.id}>
                       <td data-label="FECHA">{sale.fecha}</td>
                       <td data-label="PRODUCTO">{sale.productoNombre}</td>
                       <td data-label="MARCA">{sale.marca}</td>
+                      <td data-label="PILOTO" style={{fontWeight: '500', color: '#ff9159'}}>{sale.piloto || '-'}</td>
                       <td data-label="CANTIDAD" className={styles.centerCell}>{sale.cantidad}</td>
                       <td data-label="TALLA" className={styles.centerCell}>{sale.talla || '-'}</td>
+                      <td data-label="PRECIO COMPRA" className={styles.priceCell}>
+                        S/ {(() => {
+                          const product = products.find(p => p.id === sale.productoId);
+                          return (product?.precioCompra || 0).toFixed(2);
+                        })()}
+                      </td>
                       <td data-label="PRECIO UNIT." className={styles.priceCell}>S/ {sale.precioUnitario.toFixed(2)}</td>
                       <td data-label="TOTAL" className={styles.priceCell} style={{fontWeight: 'bold', color: '#ff9159'}}>
                         S/ {sale.total.toFixed(2)}
                       </td>
+                      <td data-label="GANANCIA" className={styles.priceCell} style={{fontWeight: 'bold', color: getGananciaWithDiscount(sale) >= 0 ? '#4caf50' : '#ff6b6b'}}>
+                        S/ {getGananciaWithDiscount(sale).toFixed(2)}
+                        {sale.piloto === 'Christian' && <div style={{fontSize: '0.75rem', color: '#ff6b6b'}}>(-S/20)</div>}
+                      </td>
                       <td data-label="ACCIONES" className={styles.actionsCell}>
                         <button
-                          onClick={() => handleDeleteSale(sale.id, sale.productoId, sale.cantidad)}
+                          onClick={() => handleEditSale(sale)}
+                          className={styles.editBtn}
+                          title="Editar venta"
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSale(sale.id, sale.productoId, sale.cantidad, sale.talla)}
                           className={styles.deleteBtn}
                           title="Eliminar venta"
                         >
