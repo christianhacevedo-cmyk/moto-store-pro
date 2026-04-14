@@ -68,8 +68,6 @@ export default function AdminPanel() {
   }, [router]);
 
   useEffect(() => {
-    loadSales();
-    
     // Configurar listeners para actualizaciones en tiempo real
     const unsubscribeProducts = onSnapshot(collection(db, 'proyectoCascos'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({
@@ -796,8 +794,8 @@ export default function AdminPanel() {
 
       const newSaleDoc = await addDoc(collection(db, 'ventas'), venta);
       
-      // Agregar la venta al state directamente
-      setSales(prev => [{ id: newSaleDoc.id, ...venta }, ...prev]);
+      // El listener onSnapshot ya actualizará automáticamente setSales
+      // No duplicar con setSales() manual aquí
 
       // Actualizar stock del producto
       const newCantidad = (parseFloat(selectedProduct.cantidad) || 1) - cantidad;
@@ -805,10 +803,7 @@ export default function AdminPanel() {
         cantidad: newCantidad
       });
       
-      // Actualizar el producto en el state
-      setProducts(prev => prev.map(p => 
-        p.id === saleData.productoId ? { ...p, cantidad: newCantidad } : p
-      ));
+      // El listener onSnapshot actualizará automáticamente setProducts con el nuevo stock
 
       // Limpiar formulario
       setSaleData({
@@ -843,13 +838,11 @@ export default function AdminPanel() {
         });
       }
 
-      // Recargar datos
-      loadProducts();
-      loadSales();
-      alert('Venta eliminada y stock restaurado');
+      // Los listeners onSnapshot actualizarán automáticamente los datos
+      setToast({ type: 'success', message: '✅ Venta eliminada y stock restaurado' });
     } catch (error) {
       console.error('Error deleting sale:', error);
-      alert('Error al eliminar la venta');
+      setToast({ type: 'error', message: '❌ Error al eliminar la venta' });
     }
   };
 
@@ -1339,7 +1332,7 @@ export default function AdminPanel() {
                     </td>
                     <td>
                       <span className={`${styles.stockBadge} ${parseFloat(product.cantidad) < 5 ? styles.stockBadgeLow : ''}`}>
-                        {parseFloat(product.cantidad) >= 5 ? 'En Stock' : 'Bajo Stock'} ({product.cantidad || 1})
+                        {parseFloat(product.cantidad) >= 5 ? 'En Stock' : 'Bajo Stock'} ({product.cantidad >= 0 ? product.cantidad : 0})
                       </span>
                     </td>
                     <td className={styles.actionsCell}>
