@@ -8,6 +8,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import HelmetCard from '@/components/HelmetCard';
 import { CertificateBadge } from '@/components/CertificateBadges';
+import { getCatalogWithCache } from '@/lib/catalogCache';
 import styles from './admin.module.css';
 import * as XLSX from 'xlsx';
 
@@ -73,13 +74,8 @@ export default function AdminPanel() {
   }, [router]);
 
   useEffect(() => {
-    // Configurar listeners para actualizaciones en tiempo real
-    const unsubscribeProducts = onSnapshot(collection(db, 'proyectoCascos'), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
+    // Cargar productos con cache + listener en tiempo real
+    const handleProductsData = (data) => {
       setProducts(data);
       setLoading(false);
       const total = data.reduce((sum, product) => {
@@ -87,11 +83,12 @@ export default function AdminPanel() {
         return sum + (parseFloat(product.precio) || 0) * qty;
       }, 0);
       setTotalValue(total);
-    }, (error) => {
-      console.error('Error en listener de produtos:', error);
-      setLoading(false);
-    });
+    };
 
+    // Use cache + real-time listener para productos
+    const unsubscribeProducts = getCatalogWithCache('proyectoCascos', handleProductsData);
+
+    // Configurar listener para ventas (sin cache, siempre tiempo real)
     const unsubscribeSales = onSnapshot(collection(db, 'ventas'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -101,7 +98,9 @@ export default function AdminPanel() {
     });
 
     return () => {
-      unsubscribeProducts();
+      if (unsubscribeProducts instanceof Function) {
+        unsubscribeProducts();
+      }
       unsubscribeSales();
     };
   }, []);
