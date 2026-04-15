@@ -45,7 +45,6 @@ export default function Promociones() {
       }
     };
   }, []);
-  }, []);
 
   useEffect(() => {
     let filtered = [...promociones];
