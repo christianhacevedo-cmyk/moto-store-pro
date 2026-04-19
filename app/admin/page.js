@@ -42,6 +42,8 @@ export default function AdminPanel() {
     precioUnitario: ''
   });
   const [editingSaleId, setEditingSaleId] = useState(null); // Para editar venta
+  const [searchProductText, setSearchProductText] = useState(''); // Para búsqueda de productos
+  const [showProductSuggestions, setShowProductSuggestions] = useState(false); // Mostrar sugerencias
 
   const [salesDateFilter, setSalesDateFilter] = useState('todos'); // 'todos', 'hora', 'dia', 'semana', 'mes'
   
@@ -280,6 +282,16 @@ export default function AdminPanel() {
       return Object.values(product.cantidad).reduce((sum, q) => sum + (parseFloat(q) || 0), 0);
     }
     return 0;
+  };
+
+  // Filtrar productos por búsqueda de texto
+  const getSearchedProducts = (searchText) => {
+    if (!searchText.trim()) return [];
+    const lowerSearch = searchText.toLowerCase();
+    return products.filter(product => 
+      product.nombre.toLowerCase().includes(lowerSearch) ||
+      product.marca.toLowerCase().includes(lowerSearch)
+    ).slice(0, 10); // Mostrar máximo 10 resultados
   };
 
   // Obtener desglose de stock por talla
@@ -1282,6 +1294,8 @@ export default function AdminPanel() {
         talla: '',
         precioUnitario: ''
       });
+      setSearchProductText('');
+      setShowProductSuggestions(false);
       setEditingSaleId(null);
     } catch (error) {
       console.error('Error registering/updating sale:', error);
@@ -1340,12 +1354,14 @@ export default function AdminPanel() {
   };
 
   const handleEditSale = (sale) => {
+    const product = products.find(p => p.id === sale.productoId);
     setSaleData({
       productoId: sale.productoId,
       cantidad: sale.cantidad.toString(),
       talla: sale.talla || '',
       precioUnitario: sale.precioUnitario.toString()
     });
+    setSearchProductText(product ? `${product.nombre} - ${product.marca}` : '');
     setEditingSaleId(sale.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1357,6 +1373,8 @@ export default function AdminPanel() {
       talla: '',
       precioUnitario: ''
     });
+    setSearchProductText('');
+    setShowProductSuggestions(false);
     setEditingSaleId(null);
   };
 
@@ -1942,26 +1960,75 @@ export default function AdminPanel() {
           <div className={styles.formCard}>
             <h3 className={styles.formTitle}>{editingSaleId ? '✏️ Editar Venta' : '⚡ Registro Rápido de Venta'}</h3>
             <form onSubmit={handleSaleSubmit} className={styles.form}>
-              <div className={styles.formGrid}>
-                <select
-                  value={saleData.productoId}
+              <div className={styles.formGrid} style={{position: 'relative', gridColumn: '1 / -1'}}>
+                <input
+                  type="text"
+                  placeholder="Buscar Producto (nombre o marca)"
+                  value={searchProductText}
                   onChange={(e) => {
-                    const selectedProduct = products.find(p => p.id === e.target.value);
-                    setSaleData({
-                      ...saleData,
-                      productoId: e.target.value,
-                      precioUnitario: selectedProduct?.precio || ''
-                    });
+                    const text = e.target.value;
+                    setSearchProductText(text);
+                    setShowProductSuggestions(text.length > 0);
                   }}
+                  onFocus={() => searchProductText.length > 0 && setShowProductSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowProductSuggestions(false), 200)}
                   className={styles.input}
-                >
-                  <option value="">Seleccionar Producto</option>
-                  {products.map(product => (
-                    <option key={product.id} value={product.id}>
-                      {product.nombre} - {product.marca} (Stock: {getTotalQuantity(product)})
-                    </option>
-                  ))}
-                </select>
+                  style={{width: '100%'}}
+                />
+                
+                {showProductSuggestions && searchProductText && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid rgba(255, 145, 89, 0.3)',
+                    borderTop: 'none',
+                    borderRadius: '0 0 8px 8px',
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    zIndex: 1000,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)'
+                  }}>
+                    {getSearchedProducts(searchProductText).length > 0 ? (
+                      getSearchedProducts(searchProductText).map(product => (
+                        <div
+                          key={product.id}
+                          onClick={() => {
+                            setSaleData({
+                              ...saleData,
+                              productoId: product.id,
+                              precioUnitario: product.precio || ''
+                            });
+                            setSearchProductText(`${product.nombre} - ${product.marca}`);
+                            setShowProductSuggestions(false);
+                          }}
+                          style={{
+                            padding: '12px 16px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid rgba(255, 145, 89, 0.1)',
+                            transition: 'background 0.2s ease',
+                            color: 'var(--text-primary)'
+                          }}
+                          onMouseEnter={(e) => e.target.style.background = 'rgba(255, 145, 89, 0.1)'}
+                          onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                        >
+                          <div style={{fontWeight: 500, fontSize: '0.9rem'}}>
+                            {product.nombre} - {product.marca}
+                          </div>
+                          <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px'}}>
+                            Stock: {getTotalQuantity(product)} | Precio: S/ {product.precio}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{padding: '12px 16px', color: 'var(--text-secondary)', textAlign: 'center'}}>
+                        No se encontraron productos
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className={styles.formGrid}>

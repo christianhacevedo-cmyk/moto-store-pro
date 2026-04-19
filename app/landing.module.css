@@ -10,7 +10,7 @@
 /* Hero Section */
 .heroSection {
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-  padding: 80px 24px;
+  padding: 40px 24px;
   text-align: center;
   border-bottom: 1px solid rgba(255, 145, 89, 0.1);
 }
@@ -33,14 +33,14 @@
 }
 
 .heroTitle {
-  font-size: 3.5rem;
+  font-size: 2.5rem;
   font-weight: 700;
-  margin: 0 0 16px 0;
-  background: linear-gradient(135deg, #ff9159 0%, #ff7a2f 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  margin: 0 0 8px 0;
+  color: #00AA00;
   letter-spacing: -0.02em;
+  text-shadow: 0 0 20px rgba(0, 170, 0, 0.6),
+               0 2px 4px rgba(0, 0, 0, 0.3),
+               0 0 40px rgba(0, 170, 0, 0.3);
 }
 
 @media (max-width: 768px) {
@@ -56,7 +56,7 @@
 }
 
 .heroSubtitle {
-  font-size: 1.25rem;
+  font-size: 1rem;
   color: var(--text-secondary);
   margin: 0;
   line-height: 1.6;
@@ -278,11 +278,11 @@
   font-weight: 800;
   margin: 0 0 48px 0;
   text-align: center;
-  background: linear-gradient(135deg, #ff9159 0%, #ff7a2f 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #00AA00;
   letter-spacing: -0.02em;
+  text-shadow: 0 0 30px rgba(0, 170, 0, 0.7),
+               0 3px 6px rgba(0, 0, 0, 0.4),
+               0 0 50px rgba(0, 170, 0, 0.4);
 }
 
 @media (max-width: 768px) {

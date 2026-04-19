@@ -90,8 +90,8 @@
 }
 
 .navLink:hover {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  color: #00AA00;
+  border-bottom-color: #00AA00;
 }
 
 .rightSection {
