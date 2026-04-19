@@ -2,8 +2,8 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import styles from './Header.module.css';
-import InRacingLogo from './InRacingLogo';
 
 export default function Header() {
   const [user, setUser] = useState(null);
@@ -35,8 +35,13 @@ export default function Header() {
       <div className={styles.container}>
         <div className={styles.logo}>
           <Link href="/" className={styles.logoLink}>
-            <InRacingLogo />
-            <span className={styles.logoText}>InRacing</span>
+            <Image 
+              src="/images/moto_logo-removebg-preview.png" 
+              alt="Moto Store Pro Logo"
+              width={450}
+              height={150}
+              priority
+            />
           </Link>
         </div>
 
