@@ -9,8 +9,8 @@ export default function HomePage() {
           --bg-secondary: #1a1a1a;
           --text-primary: #ffffff;
           --text-secondary: #adaaaa;
-          --primary: #ff9159;
-          --primary-dark: #ff7a2f;
+          --primary: #00AA00;
+          --primary-dark: #008800;
         }
         
         * {

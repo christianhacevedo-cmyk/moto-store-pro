@@ -183,6 +183,36 @@ export default function AdminPanel() {
     return gananciaUnitaria * (sale.cantidad || 1);
   };
 
+  // Calcular valor total invertido en inventario (costo de compra del stock actual)
+  const calculateTotalInventoryValue = (filterByPiloto = null) => {
+    return products.reduce((total, product) => {
+      // Si hay filtro de piloto, solo contar productos de ese piloto
+      if (filterByPiloto && product.piloto !== filterByPiloto) {
+        return total;
+      }
+      const precioCompra = parseFloat(product.precioCompra) || 0;
+      const cantidad = getTotalQuantity(product);
+      return total + (precioCompra * cantidad);
+    }, 0);
+  };
+
+  // Calcular ganancia total acumulada de todas las ventas
+  const calculateTotalGanancia = (filterByPiloto = null) => {
+    const salesToCount = filterByPiloto 
+      ? sales.filter(s => s.piloto === filterByPiloto)
+      : sales;
+    return salesToCount.reduce((total, sale) => {
+      return total + getGananciaWithDiscount(sale);
+    }, 0);
+  };
+
+  // Calcular capital neto invertido (inversión actual menos ganancia recuperada)
+  const calculateNetCapitalInvested = (filterByPiloto = null) => {
+    const inventoryValue = calculateTotalInventoryValue(filterByPiloto);
+    const totalGanancia = calculateTotalGanancia(filterByPiloto);
+    return inventoryValue - totalGanancia;
+  };
+
   const handleExportToExcel = () => {
     try {
       const filteredSales = getFilteredSalesByPiloto();
@@ -2184,6 +2214,26 @@ export default function AdminPanel() {
                   }, 0);
                   return totalGanancia.toFixed(2);
                 })()}
+              </span>
+            </div>
+            <div className={styles.metricCard} style={{borderTop: '2px solid rgba(255, 145, 89, 0.3)', paddingTop: '20px', marginTop: '12px'}}>
+              <span className={styles.metricLabel}>💰 Valor Actual Inventario {ventasFilter ? `(${ventasFilter})` : ''}</span>
+              <span className={styles.metricValue} style={{color: '#ff9159', fontSize: '1.3rem'}}>
+                S/ {calculateTotalInventoryValue(ventasFilter).toFixed(2)}
+              </span>
+              <span style={{fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '8px', display: 'block'}}>
+                Costo de compra del stock actual
+              </span>
+            </div>
+            <div className={styles.metricCard} style={{borderTop: '2px solid rgba(255, 145, 89, 0.3)', paddingTop: '20px'}}>
+              <span className={styles.metricLabel}>📊 Capital Neto Invertido {ventasFilter ? `(${ventasFilter})` : ''}</span>
+              <span className={styles.metricValue} style={{color: calculateNetCapitalInvested(ventasFilter) > 0 ? '#ff9159' : '#4caf50', fontSize: '1.3rem'}}>
+                S/ {calculateNetCapitalInvested(ventasFilter).toFixed(2)}
+              </span>
+              <span style={{fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '8px', display: 'block'}}>
+                {calculateNetCapitalInvested(ventasFilter) > 0 
+                  ? 'Capital aún invertido en el negocio' 
+                  : 'Ganancia neta (sin capital inv.)'}
               </span>
             </div>
           </div>
