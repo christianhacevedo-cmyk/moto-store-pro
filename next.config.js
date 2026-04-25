@@ -1,10 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    optimizePackageImports: ["@mantine/core", "@mantine/hooks"],
-  },
   productionBrowserSourceMaps: false,
-  skipTracing: true,
+  swcMinify: true,
 };
 
 module.exports = nextConfig;
