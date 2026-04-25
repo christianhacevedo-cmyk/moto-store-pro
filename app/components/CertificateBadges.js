@@ -1,3 +1,6 @@
+'use client';
+import Image from 'next/image';
+
 export function DotCertificate({ size = "default" }) {
   const sizeMap = {
     small: { width: 50, height: 65 },
@@ -181,6 +184,32 @@ export function EceCertificate({ size = "default" }) {
 export function CertificateBadge({ type, size = "default" }) {
   if (!type) return null;
   
+  // Nuevos certificados con imágenes
+  if (type === 'Logan' || type === 'Xtreme') {
+    const sizeMap = {
+      small: { width: 130, height: 80 },
+      default: { width: 230, height: 130 },
+      large: { width: 460, height: 260 }
+    };
+    const dims = sizeMap[size];
+    const imageMap = {
+      'Logan': 'logan.png',
+      'Xtreme': 'xtreme.png'
+    };
+    
+    return (
+      <Image 
+        src={`/certificaciones/${imageMap[type]}`}
+        alt={type}
+        width={dims.width}
+        height={dims.height}
+        priority
+        quality={100}
+      />
+    );
+  }
+  
+  // Certificados antiguos (compatibilidad)
   if (type === 'DOT') {
     return <DotCertificate size={size} />;
   }

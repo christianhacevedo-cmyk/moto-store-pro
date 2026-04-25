@@ -62,8 +62,10 @@ export default function AdminPanel() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedProducts, setSelectedProducts] = useState(new Set()); // Para selección múltiple
   const [marcasSugeridas, setMarcasSugeridas] = useState([]); // Para autocompletado
+  const [nombresSugeridos, setNombresSugeridos] = useState([]); // Para autocompletado de nombres
   const [duplicadoEncontrado, setDuplicadoEncontrado] = useState(null); // Para búsqueda en tiempo real
   const [draggedProductId, setDraggedProductId] = useState(null); // Para drag & drop de cascos
+  const [limpiarCertificadosLoading, setLimpiarCertificadosLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -437,6 +439,15 @@ export default function AdminPanel() {
       ...prev,
       [name]: value
     }));
+
+    // Sugerencias de nombre
+    if (name === 'nombre') {
+      const uniqueNombres = [...new Set(products.map(p => p.nombre).filter(Boolean))];
+      const sugeridas = uniqueNombres.filter(n => 
+        n.toLowerCase().includes(value.toLowerCase())
+      );
+      setNombresSugeridos(sugeridas);
+    }
 
     // Change 2: Sugerencias de marca
     if (name === 'marca') {
@@ -1112,6 +1123,72 @@ export default function AdminPanel() {
     }
   };
 
+  const handleCleanCertificates = async () => {
+    if (!confirm('⚠️ ¿Estás seguro de que deseas limpiar TODOS los certificados antiguos del inventario?\n\nEsta acción no se puede deshacer.')) {
+      return;
+    }
+
+    setLimpiarCertificadosLoading(true);
+    try {
+      console.log('🧹 Iniciando limpieza de certificados...');
+      
+      let actualizados = 0;
+      const cascos = [];
+      const updatePromises = [];
+
+      // Recolectar todos los documentos que necesitan actualización
+      for (const product of products) {
+        if (product.certificados && product.certificados.length > 0) {
+          cascos.push({
+            nombre: product.nombre,
+            certificados: product.certificados.join(', ')
+          });
+          
+          // Crear promesa para actualizar
+          updatePromises.push(
+            updateDoc(doc(db, 'proyectoCascos', product.id), {
+              certificados: []
+            })
+          );
+          actualizados++;
+        }
+      }
+
+      // Ejecutar todas las actualizaciones en paralelo
+      if (updatePromises.length > 0) {
+        console.log(`Actualizando ${updatePromises.length} cascos...`);
+        await Promise.all(updatePromises);
+      }
+
+      // Actualizar estado local
+      const updatedProducts = products.map(p => ({
+        ...p,
+        certificados: []
+      }));
+      setProducts(updatedProducts);
+
+      const sinCambios = products.length - actualizados;
+      const mensaje = `✅ Limpieza completada!\n📊 Total: ${products.length}\n✔️ Actualizados: ${actualizados}\n➖ Sin cambios: ${sinCambios}`;
+      setToast({ type: 'success', message: mensaje });
+      
+      console.log(`✅ Limpieza exitosa: ${actualizados} cascos actualizados`);
+      console.log('Cascos limpiados:', cascos);
+    } catch (error) {
+      console.error('Error limpiando certificados:', error);
+      // Si el error es de permisos, mostrar instrucción
+      if (error.message.includes('permission')) {
+        setToast({ 
+          type: 'error', 
+          message: '❌ Error de permisos. Contacta con el administrador de Firebase.' 
+        });
+      } else {
+        setToast({ type: 'error', message: '❌ Error: ' + error.message });
+      }
+    } finally {
+      setLimpiarCertificadosLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('adminUser');
     router.push('/login');
@@ -1420,9 +1497,30 @@ export default function AdminPanel() {
           <h1 className={styles.headerTitle}>InRacing</h1>
           <p className={styles.headerSubtitle}>Gestión de Inventario Premium</p>
         </div>
-        <button onClick={handleLogout} className={styles.logoutBtn}>
-          Cerrar Sesión
-        </button>
+        <div style={{display: 'flex', gap: '12px', alignItems: 'center'}}>
+          <button 
+            onClick={handleCleanCertificates}
+            disabled={limpiarCertificadosLoading}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#ff6b35',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: limpiarCertificadosLoading ? 'not-allowed' : 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: '600',
+              opacity: limpiarCertificadosLoading ? 0.6 : 1,
+              transition: 'all 0.3s ease'
+            }}
+            title="Limpia todos los certificados antiguos del inventario"
+          >
+            {limpiarCertificadosLoading ? '⏳ Limpiando...' : '🧹 Limpiar Certificados'}
+          </button>
+          <button onClick={handleLogout} className={styles.logoutBtn}>
+            Cerrar Sesión
+          </button>
+        </div>
       </div>
 
       {/* TABS DE NAVEGACIÓN */}
@@ -1472,6 +1570,38 @@ export default function AdminPanel() {
                   className={styles.input}
                 />
               </div>
+
+              {/* Mostrar sugerencias de nombre */}
+              {nombresSugeridos.length > 0 && formData.nombre && (
+                <div style={{
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid rgba(255, 145, 89, 0.3)',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  maxHeight: '150px',
+                  overflowY: 'auto'
+                }}>
+                  {nombresSugeridos.map(nombre => (
+                    <div
+                      key={nombre}
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, nombre }));
+                        setNombresSugeridos([]);
+                      }}
+                      style={{
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid rgba(255, 145, 89, 0.1)',
+                        fontSize: '0.9rem'
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255, 145, 89, 0.1)'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                    >
+                      {nombre}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Change 2: Mostrar sugerencias de marca */}
               {marcasSugeridas.length > 0 && formData.marca && (
@@ -1683,9 +1813,9 @@ export default function AdminPanel() {
 
               <div className={styles.formGrid}>
                 <div style={{gridColumn: '1 / -1'}}>
-                  <label className={styles.filterLabel}>Certificados (máximo 3)</label>
+                  <label className={styles.filterLabel}>Certificaciones</label>
                   <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px'}}>
-                    {['DOT', 'ECE'].map(cert => (
+                    {['Logan', 'Xtreme'].map(cert => (
                       <div
                         key={cert}
                         onClick={() => handleCertificateToggle(cert)}
@@ -1711,17 +1841,17 @@ export default function AdminPanel() {
                         />
                         <div>
                           <div style={{fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.95rem'}}>
-                            {cert === 'DOT' ? '🇺🇸 DOT' : '🇪🇺 ECE R22-05'}
+                            {cert === 'Logan' ? '🏍️ Logan' : '⚡ Xtreme'}
                           </div>
                           <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px'}}>
-                            {cert === 'DOT' ? 'USA Standard' : 'European Safety'}
+                            {cert === 'Logan' ? 'WA-202 ECE 22.06' : 'JH-902 DOT FMVSS'}
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                   <div style={{marginTop: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)'}}>
-                    Seleccionados: {formData.certificados?.length || 0} / 3
+                    Seleccionados: {formData.certificados?.length || 0}
                   </div>
                 </div>
               </div>

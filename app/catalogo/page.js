@@ -21,6 +21,7 @@ export default function Catalogo() {
   const [showModal, setShowModal] = useState(false);
   const [showImageLightbox, setShowImageLightbox] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [mainImageIndex, setMainImageIndex] = useState(0); // Para navegar imagen principal
   const [hoveredHelmetId, setHoveredHelmetId] = useState(null);
   
   const [filters, setFilters] = useState({
@@ -279,6 +280,7 @@ export default function Catalogo() {
                     onClick={() => {
                       setSelectedHelmet(helmet);
                       setSelectedImage(null);
+                      setMainImageIndex(0); // Reset al abrir modal
                       setShowModal(true);
                     }}
                     className={styles.cardWrapper}
@@ -322,10 +324,44 @@ export default function Catalogo() {
                 <div className={styles.modalImageWrapper}>
                   <div className={styles.modalImage}>
                     <img 
-                      src={selectedImage || selectedHelmet.imagen} 
+                      src={
+                        selectedHelmet.imagenes && selectedHelmet.imagenes.length > 0
+                          ? selectedHelmet.imagenes[mainImageIndex]
+                          : selectedHelmet.imagen
+                      } 
                       alt={selectedHelmet.nombre}
                       className={styles.modalImg}
+                      loading="eager"
                     />
+                    
+                    {/* Flechas de navegación */}
+                    {selectedHelmet.imagenes && selectedHelmet.imagenes.length > 1 && (
+                      <>
+                        <button
+                          onClick={() => setMainImageIndex(prev => 
+                            prev === 0 ? selectedHelmet.imagenes.length - 1 : prev - 1
+                          )}
+                          className={styles.navArrow}
+                          style={{ left: '10px' }}
+                          aria-label="Imagen anterior"
+                        >
+                          ‹
+                        </button>
+                        <button
+                          onClick={() => setMainImageIndex(prev => 
+                            prev === selectedHelmet.imagenes.length - 1 ? 0 : prev + 1
+                          )}
+                          className={styles.navArrow}
+                          style={{ right: '10px' }}
+                          aria-label="Imagen siguiente"
+                        >
+                          ›
+                        </button>
+                        <div className={styles.imageCounter}>
+                          {mainImageIndex + 1} / {selectedHelmet.imagenes.length}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {selectedHelmet.certificados && selectedHelmet.certificados.length > 0 && (
@@ -373,7 +409,11 @@ export default function Catalogo() {
                   {selectedHelmet.talla && (
                     <div className={styles.specItem}>
                       <span className={styles.specLabel}>Talla:</span>
-                      <span className={styles.specValue}>{selectedHelmet.talla}</span>
+                      <span className={styles.specValue}>
+                        {Array.isArray(selectedHelmet.talla) 
+                          ? selectedHelmet.talla.join(' - ') 
+                          : selectedHelmet.talla.replace(/([A-Z]+)/g, '$1 - ').replace(/\s-\s$/, '')}
+                      </span>
                     </div>
                   )}
 
