@@ -335,33 +335,36 @@ export default function Catalogo() {
                     />
                     
                     {/* Flechas de navegación */}
-                    {selectedHelmet.imagenes && selectedHelmet.imagenes.length > 1 && (
-                      <>
-                        <button
-                          onClick={() => setMainImageIndex(prev => 
-                            prev === 0 ? selectedHelmet.imagenes.length - 1 : prev - 1
-                          )}
-                          className={styles.navArrow}
-                          style={{ left: '10px' }}
-                          aria-label="Imagen anterior"
-                        >
-                          ‹
-                        </button>
-                        <button
-                          onClick={() => setMainImageIndex(prev => 
-                            prev === selectedHelmet.imagenes.length - 1 ? 0 : prev + 1
-                          )}
-                          className={styles.navArrow}
-                          style={{ right: '10px' }}
-                          aria-label="Imagen siguiente"
-                        >
-                          ›
-                        </button>
-                        <div className={styles.imageCounter}>
-                          {mainImageIndex + 1} / {selectedHelmet.imagenes.length}
-                        </div>
-                      </>
-                    )}
+                    {selectedHelmet.imagenes && selectedHelmet.imagenes.length > 1 && (() => {
+                      const totalImages = selectedHelmet.imagenes.length;
+                      return (
+                        <>
+                          <button
+                            onClick={() => setMainImageIndex(prev => 
+                              prev === 0 ? totalImages - 1 : prev - 1
+                            )}
+                            className={styles.navArrow}
+                            style={{ left: '10px' }}
+                            aria-label="Imagen anterior"
+                          >
+                            ‹
+                          </button>
+                          <button
+                            onClick={() => setMainImageIndex(prev => 
+                              prev === totalImages - 1 ? 0 : prev + 1
+                            )}
+                            className={styles.navArrow}
+                            style={{ right: '10px' }}
+                            aria-label="Imagen siguiente"
+                          >
+                            ›
+                          </button>
+                          <div className={styles.imageCounter}>
+                            {mainImageIndex + 1} / {totalImages}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {selectedHelmet.certificados && selectedHelmet.certificados.length > 0 && (
